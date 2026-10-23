@@ -6,11 +6,12 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Qt
+from panel_spec import panel_for, ACTION_LABELS
 from compatibility import host_version, compatibility_state, LABELS
 from tool_source import fetch_packages
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPushButton, QLineEdit, QFileDialog, QStackedWidget, QComboBox, QCheckBox, QMessageBox)
+    QListWidgetItem, QPushButton, QLineEdit, QFileDialog, QStackedWidget, QComboBox, QCheckBox, QMessageBox, QScrollArea)
 
 
 class PullJob(QThread):
@@ -30,7 +31,7 @@ def discover_tools(root):
     tools, errors = [], []
     root = Path(root).resolve()
     for manifest_path in sorted(root.rglob('tool.json')):
-        if any(p.startswith('.download-') for p in manifest_path.parts):
+        if any(p.startswith(('.download-', '.removed-')) for p in manifest_path.parts):
             continue
         try:
             data = json.loads(manifest_path.read_text('utf-8'))
@@ -47,6 +48,7 @@ def discover_tools(root):
             if hashlib.sha256(entry.read_bytes()).hexdigest() != data.get('sha256'):
                 raise ValueError('脚本已修改，需核对并更新 manifest 中的 SHA-256')
             compatibility_state(data.get('compatibility'), '2026.3')
+            panel_for(data)
             if any((t['id'], package_key(t)) == (data['id'], package_key(data)) for t in tools):
                 continue
             data.update(root=package, entry_path=entry)
@@ -94,15 +96,16 @@ def install_script(tool, scripts_directory):
 
 
 class ToolWorkspace(QWidget):
-    def __init__(self, tools_root, config_root):
+    def __init__(self, tools_root, config_root, managed=False):
         super().__init__()
+        self.managed = managed
         self.tools_root = Path(tools_root)
         self.tools_root.mkdir(parents=True, exist_ok=True)
         self.config_file = Path(config_root) / 'hosts.json'
         self.config = json.loads(self.config_file.read_text('utf-8')) if self.config_file.exists() else {}
         self.pull_job = None
         outer = QVBoxLayout(self)
-        outer.addWidget(QLabel('工具工作区 · 每个工具有独立面板'))
+        outer.addWidget(QLabel('我的工具 · 面板由工具定义'))
         row = QHBoxLayout()
         self.executable = QLineEdit(self.config.get('3dsmax', ''))
         self.executable.setPlaceholderText('配置 3dsmax.exe 后可启动软件或打开插件 UI')
@@ -141,6 +144,12 @@ class ToolWorkspace(QWidget):
         outer.addWidget(self.status)
         outer.addWidget(QLabel('本地工具目录：' + str(self.tools_root)))
         self.reload()
+        if managed:
+            # The application shell owns discovery and settings; only embed the author panel.
+            for child in self.findChildren(QWidget):
+                if child.parent() is self and child not in (self.pages, self.status):
+                    child.hide()
+            self.list.hide()
 
     def save_config(self):
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -217,6 +226,17 @@ class ToolWorkspace(QWidget):
             return '脚本已安装到 ' + str(target) + '；可通过 Max 的“运行脚本”调用。'
         return '已取消安装'
 
+    def dispatch_panel_action(self, action, tool):
+        if action == 'launchHost':
+            return self.launch()
+        if action == 'installPlugin':
+            return self.install(tool)
+        if action == 'openPluginUI':
+            return self.launch(tool)
+        if action == 'openFolder':
+            return os.startfile(str(tool['root']))
+        raise ValueError('不支持的面板操作')
+
     def reload(self):
         selected_id = self.list.currentItem().data(256) if self.list.currentItem() else None
         self.list.clear()
@@ -247,9 +267,11 @@ class ToolWorkspace(QWidget):
             title = QLabel(tool['name'])
             title.setStyleSheet('font-size:25px;font-weight:700;color:#a9c5ff')
             layout.addWidget(title)
+            title.setVisible(not self.managed)
             description = QLabel(tool['description'])
             description.setWordWrap(True)
             layout.addWidget(description)
+            description.setVisible(not self.managed)
             layout.addWidget(QLabel('3ds Max 脚本  ·  版本 ' + tool['version']))
             selector = QComboBox()
             for version in versions:
@@ -258,25 +280,44 @@ class ToolWorkspace(QWidget):
             selector.setCurrentIndex(versions.index(tool))
             selector.currentIndexChanged.connect(lambda index, control=selector, key=identity: self.choose_version(key, control.itemData(index)))
             layout.addWidget(selector)
+            selector.setVisible(not self.managed)
             compatibility = tool.get('compatibility', {})
             state = compatibility_state(compatibility, self.host_version.text())
-            layout.addWidget(QLabel('兼容范围：' + compatibility.get('range', '未声明') + '  ·  ' + LABELS[state]))
-            source = tool.get('source', {})
-            layout.addWidget(QLabel('来源：' + source.get('repository', '本地工具')))
-            for label, action in [
-                ('启动 3ds Max', lambda: self.launch()),
-                ('安装脚本到用户目录', lambda t=tool: self.install(t)),
-                ('启动 Max 并打开此工具 UI', lambda t=tool: self.launch(t)),
-                ('打开工具文件夹', lambda t=tool: os.startfile(str(t['root'])))]:
-                button = QPushButton(label)
-                button.clicked.connect(lambda checked=False, fn=action: self.run_action(fn))
-                layout.addWidget(button)
-            note = QLabel('将启动新的 Max 实例并打开工具界面。暂不支持在已打开的 Max 实例中呼出。')
-            note.setWordWrap(True)
-            layout.addWidget(note)
+            layout.addWidget(QLabel('兼容范围：' + compatibility.get('range', '未声明').replace('unverified', '待验证') + '  ·  ' + LABELS[state]))
+            definition = panel_for(tool)
+            if definition['type'] == 'none':
+                label = QLabel('此工具不提供自定义面板。可在宿主软件中使用。')
+                layout.addWidget(label)
+            else:
+                content = QWidget()
+                content_layout = QVBoxLayout(content)
+                if definition.get('title'):
+                    heading = QLabel(definition['title'])
+                    heading.setTextFormat(Qt.TextFormat.PlainText)
+                    heading.setStyleSheet('font-size:20px;font-weight:600;color:' + definition.get('accent', '#a9c5ff'))
+                    content_layout.addWidget(heading)
+                for section in definition['sections']:
+                    for key in ('title', 'text'):
+                        if key in section:
+                            label = QLabel(section[key])
+                            label.setTextFormat(Qt.TextFormat.PlainText)
+                            label.setWordWrap(True)
+                            if key == 'title':
+                                label.setStyleSheet('font-weight:600')
+                            content_layout.addWidget(label)
+                    for action in section.get('actions', []):
+                        button = QPushButton(action.get('label', ACTION_LABELS[action['action']]))
+                        button.clicked.connect(lambda checked=False, a=action['action'], t=tool:
+                            self.run_action(lambda: self.dispatch_panel_action(a, t)))
+                        content_layout.addWidget(button)
+                content_layout.addStretch()
+                scroll = QScrollArea()
+                scroll.setWidgetResizable(True)
+                scroll.setWidget(content)
+                layout.addWidget(scroll, 1)
             layout.addStretch()
             self.pages.addWidget(panel)
         if self.list.count():
             self.list.setCurrentRow(next((i for i in range(self.list.count()) if self.list.item(i).data(256) == selected_id), 0))
-        self.status.setText('\n'.join(errors) if errors else f'已加载 {len(tools)} 个工具面板')
+        self.status.setText('\n'.join(errors) if errors else ('' if self.managed else f'已加载 {len(tools)} 个工具版本'))
 

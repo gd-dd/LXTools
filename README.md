@@ -1,42 +1,43 @@
-# LXTool
+# LXTool · 游戏制作工具商店
 
-Windows 游戏制作工具架。包含工具工作区、每工具独立面板和工具架配置页。工具业务文件保存在应用旁 tools 目录，不提交到工具架仓库。
+Windows 桌面客户端。打开即可浏览作者维护的工具目录，按需安装；无需填写仓库地址，也不提供用户添加仓库功能。GitHub 是分发后台，不是日常操作入口。
+
+## 启动
+
+运行 `dist/LXTool/LXTool.exe`，或双击 `start.bat`。首次启动展示内置目录并自动刷新；网络不可用时保留上次目录，本地工具仍可使用。
 
 ## 使用
 
-解压完整的 `LXTool-windows-x64.zip`，运行其中 `LXTool/LXTool.exe`，无需安装 Python。不要单独移动 EXE，需保留同目录的 `_internal`。
+- **发现工具**：搜索、按用途筛选，查看工具详情与兼容信息，安装到本地。
+- **我的工具**：查看已安装工具，打开工具自己定义的面板。
+- **我的夹子**：新建中文夹子，重命名或移除；在工具详情右上角选择收纳位置。移除夹子不删除工具。
+- **版本与卸载**：列出作者索引中的全部释出版本及本地版本，显示兼容范围、安装状态、日期和更新说明。可安装历史版本、切换/回退或卸载单个版本。
+- **设置与更新**：设置 3ds Max 路径与软件版本；检查客户端发行版，下载校验后确认更新并重启。
 
-1. 添加 GitHub 仓库（owner/repo），选择分类。
-2. 选中工具，检查工具更新，选择 ZIP 附件下载。
-3. 在本地版本中选择并启用；可以保留多个版本、打开目录、卸载非当前版本。
-4. 私有仓库通过“仓库凭据”保存令牌到 Windows 凭据管理器，留空提交可清除。不要将令牌写进代码或发送到聊天。
-5. 导入目录接受 catalog/catalog.schema.json 定义的 JSON；同步 GitHub 目录读取指定仓库的 catalog/catalog.json。
+六个现有 Max 脚本目前各有一个收录版本，全部标为“待验证”；不会虚构历史版本、发布日期或兼容测试结果。插件实际运行依赖本机安装的 Max。启动插件会新开 Max 实例，尚不支持向已有 Max 实例发命令。
 
-数据存于 `%LOCALAPPDATA%/LXTool`，升级程序目录不影响工具数据。只能运行一个桌面实例。
+## 数据位置
 
-ZIP 下载上限 512 MB，解压上限 2 GB、20000 文件；拒绝路径穿越和符号链接。远端提供 SHA-256 时核对，否则明确显示未验证远端哈希。下载后的工具不会自动执行。版本查询最多覆盖 1000 个 Release。
+- 工具包：EXE 同级 `tools/`；开发环境为根目录 `tools/`。不提交到工具架仓库，不打进公共 ZIP。
+- 夹子、环境、目录缓存：`%LOCALAPPDATA%/LXTool/`。
+- 工具卸载仅删除工具架内选中的版本，不移除曾复制到 Max 用户脚本目录的文件。
+- 客户端更新只替换 `LXTool.exe` 和 `_internal`，保留工具和个人设置；失败尝试回滚，旧程序保留在同级 `.lxtool-backup-*`。
 
-## 客户端发布
+## 作者维护
 
-客户端更新源为 gd-dd/LXTools。检查稳定发布，下载命名为 LXTool-windows-x64.zip 且具有 SHA-256 的更新包，校验后准备到独立目录并打开。关闭旧窗口后运行新版，保留旧版本及用户数据；不原地覆盖正在运行的程序。
+[工具开发规范](docs/tool-authoring.md) · [商店与发布](docs/store-publishing.md) · [OAuth 注册指南](docs/github-login-setup.md)
 
-源码和目录文件已提交到 gd-dd/LXTools，真实目录同步已验证。当前尚无 Release；客户端升级和私有资源仍待真实发布资源验收。具体工具后续添加。
+作者在 `catalog/store.json` 登记工具源。每个工具源根目录维护 `tools-index.json` 和兼容范围目录。客户端从作者目录自动发现新增工具/版本。用户界面没有编辑来源的入口。
 
-## 构建
+工具面板支持声明式内容及 `none` 模式，可自定义分组、文本、按钮和强调色；插件原有 UI 不变。
 
-Windows + Python 3.12：运行 `powershell -ExecutionPolicy Bypass -File build.ps1`，安装锁定依赖、运行测试、使用 PyInstaller 生成桌面包和 ZIP。源码入口 `src/desktop.py`；旧浏览器入口 `src/app.py` 仅供历史参考。
+## 构建与验证
 
-GitHub Actions 工作流位于 `.github/workflows/build.yml`，构建产物作为工作流 Artifact 保存。未配置自动发布 Release。
+```powershell
+.\build.ps1
+```
 
-验证：`.venv/Scripts/python.exe -m unittest discover -s tests -v`。
+使用锁定的依赖安装环境，执行 unittest，再通过 PyInstaller 构建 Windows EXE 和 ZIP。商店只打包目录元数据，不包含工具业务代码。公共分发文件为 `dist/LXTool-windows-x64.zip`。
 
-## 人工验收
-
-检查窗口大小与中文显示；添加仓库并查询版本；下载两个版本后切换、关闭重开确认状态；检查空仓库、无 ZIP 发布与网络失败的提示。
-
-构建、测试与尚未完成项见 TODO.md。工具分发约定见 docs/tool-distribution.md。
-
-## 本地工具面板（0.2）
-
-已下载的 6 个 Max 工具位于开发目录 tools，并复制到本机 EXE 同级 tools 供使用。公共 ZIP 不包含这些工具。格式和能力边界见 docs/tool-panels.md。当前支持配置宿主、启动 Max、复制安装脚本、新启动 Max 并加载工具 UI；现有实例桥接及真实 Max 运行尚待验证。
+GitHub 账户登录尚未启用：需作者注册 OAuth App 并开启 Device Flow，再接入 Client ID。公开商店不依赖登录。
 

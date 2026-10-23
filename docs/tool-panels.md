@@ -20,3 +20,5 @@
 
 3ds Max 2026.3 的实际测试由用户后续进行，当前 testedVersions 为空。发布新兼容范围时同步更新目录、manifest 和 tools-index.json，保留已有版本。
 
+面板内容现支持由工具自行声明，开发准则见 [工具开发规范](tool-authoring.md)。旧包继续使用兼容面板；新包显式设置 panel。
+

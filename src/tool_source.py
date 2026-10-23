@@ -20,11 +20,13 @@ def github_json(path, token=None):
         return json.load(response)
 
 
-def fetch_packages(repository, destination, selected_host, include_unverified=False, token=None):
+def fetch_packages(repository, destination, selected_host, include_unverified=False, token=None, manifest_path=None, commit=None):
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
         raise ValueError('仓库格式应为 owner/repo')
     base = '/repos/' + repository
-    commit = github_json(base + '/commits/HEAD', token)['sha']
+    commit = commit or github_json(base + '/commits/HEAD', token)['sha']
+    if not re.fullmatch(r'[a-f0-9]{40}', commit):
+        raise ValueError('无效提交标识')
     def read(path):
         if path.startswith('/') or any(p in ('', '.', '..') for p in path.split('/')) or '\\' in path:
             raise ValueError('非法源文件路径')
@@ -39,10 +41,14 @@ def fetch_packages(repository, destination, selected_host, include_unverified=Fa
     destination.mkdir(parents=True, exist_ok=True)
     installed = []
     for item in index['packages']:
+        if manifest_path and item['manifest'] != manifest_path:
+            continue
         state = compatibility_state(item.get('compatibility'), selected_host)
         if state == 'incompatible' or (state == 'unverified' and not include_unverified):
             continue
         manifest = json.loads(read(item['manifest']))
+        from panel_spec import panel_for
+        panel_for(manifest)
         for key in ('id', 'version'):
             if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', manifest.get(key, '')) or manifest[key].endswith('.'):
                 raise ValueError('工具标识或版本无效')
@@ -68,6 +74,8 @@ def fetch_packages(repository, destination, selected_host, include_unverified=Fa
                 if hashlib.sha256(data).hexdigest() != digest:
                     raise ValueError('工具资源校验失败')
                 (staging / name).write_bytes(data)
+            if manifest.get('sha256') != files.get(manifest.get('entry')):
+                raise ValueError('入口校验声明不一致')
             (staging / 'tool.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), 'utf-8')
             if target.exists():
                 for name in [*files, 'tool.json']:
@@ -80,5 +88,7 @@ def fetch_packages(repository, destination, selected_host, include_unverified=Fa
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
+    if manifest_path and not installed:
+        raise ValueError('所选版本已撤下或不兼容，请刷新商店目录')
     return installed
 

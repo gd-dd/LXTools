@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    "gd-dd/3dmaxScript"
+  ],
+  "packages": [
+    {
+      "id": "animation-bake",
+      "name": "动画烘焙工具",
+      "description": "将位移、旋转和缩放按指定采样间隔烘焙。",
+      "host": "3dsmax",
+      "version": "131f754d2ee5",
+      "compatibility": {
+        "range": "unverified",
+        "testedVersions": []
+      },
+      "repository": "gd-dd/3dmaxScript",
+      "manifest": "releases/unverified/131f754d2ee5/animation-bake/tool.json",
+      "notes": "首次收录现有脚本，兼容性待实测。",
+      "publishedAt": "",
+      "category": "动画"
+    },
+    {
+      "id": "keyframe-formula",
+      "name": "自定义公式关键帧",
+      "description": "通过公式批量调整关键帧。",
+      "host": "3dsmax",
+      "version": "131f754d2ee5",
+      "compatibility": {
+        "range": "unverified",
+        "testedVersions": []
+      },
+      "repository": "gd-dd/3dmaxScript",
+      "manifest": "releases/unverified/131f754d2ee5/keyframe-formula/tool.json",
+      "notes": "首次收录现有脚本，兼容性待实测。",
+      "publishedAt": "",
+      "category": "动画"
+    },
+    {
+      "id": "material-split",
+      "name": "按材质ID拆分模型",
+      "description": "按材质 ID 拆分模型，整理分部导出。",
+      "host": "3dsmax",
+      "version": "131f754d2ee5",
+      "compatibility": {
+        "range": "unverified",
+        "testedVersions": []
+      },
+      "repository": "gd-dd/3dmaxScript",
+      "manifest": "releases/unverified/131f754d2ee5/material-split/tool.json",
+      "notes": "首次收录现有脚本，兼容性待实测。",
+      "publishedAt": "",
+      "category": "建模"
+    },
+    {
+      "id": "parent-keep-world",
+      "name": "保持位移建立父子",
+      "description": "建立父子层级并保持世界空间动画。",
+      "host": "3dsmax",
+      "version": "131f754d2ee5",
+      "compatibility": {
+        "range": "unverified",
+        "testedVersions": []
+      },
+      "repository": "gd-dd/3dmaxScript",
+      "manifest": "releases/unverified/131f754d2ee5/parent-keep-world/tool.json",
+      "notes": "首次收录现有脚本，兼容性待实测。",
+      "publishedAt": "",
+      "category": "动画"
+    },
+    {
+      "id": "pmx-import",
+      "name": "PMX导入",
+      "description": "导入 PMX 模型及相关资源。",
+      "host": "3dsmax",
+      "version": "131f754d2ee5",
+      "compatibility": {
+        "range": "unverified",
+        "testedVersions": []
+      },
+      "repository": "gd-dd/3dmaxScript",
+      "manifest": "releases/unverified/131f754d2ee5/pmx-import/tool.json",
+      "notes": "首次收录现有脚本，兼容性待实测。",
+      "publishedAt": "",
+      "category": "导入"
+    },
+    {
+      "id": "root-cleanup",
+      "name": "清理根骨骼",
+      "description": "将根骨骼运动转移到虚拟体。",
+      "host": "3dsmax",
+      "version": "131f754d2ee5",
+      "compatibility": {
+        "range": "unverified",
+        "testedVersions": []
+      },
+      "repository": "gd-dd/3dmaxScript",
+      "manifest": "releases/unverified/131f754d2ee5/root-cleanup/tool.json",
+      "notes": "首次收录现有脚本，兼容性待实测。",
+      "publishedAt": "",
+      "category": "动画"
+    }
+  ]
+}

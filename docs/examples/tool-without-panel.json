@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "my-max-tool",
+  "name": "我的 Max 工具",
+  "description": "说明用途和使用条件",
+  "host": "3dsmax",
+  "entry": "main.ms",
+  "version": "1.0.0",
+  "sha256": "替换为 main.ms 的 SHA-256",
+  "files": {
+    "main.ms": "替换为 main.ms 的 SHA-256"
+  },
+  "compatibility": {
+    "range": "unverified",
+    "testedVersions": []
+  },
+  "panel": {
+    "type": "none"
+  }
+}
+
