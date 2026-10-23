@@ -1,6 +1,6 @@
 # LXTool
 
-Windows 游戏制作工具架。首版负责工具获取、更新、多版本管理，不修改 3ds Max 或 Unity 项目。
+Windows 游戏制作工具架。包含工具工作区、每工具独立面板和工具架配置页。工具业务文件保存在应用旁 tools 目录，不提交到工具架仓库。
 
 ## 使用
 
@@ -35,3 +35,8 @@ GitHub Actions 工作流位于 `.github/workflows/build.yml`，构建产物作�
 检查窗口大小与中文显示；添加仓库并查询版本；下载两个版本后切换、关闭重开确认状态；检查空仓库、无 ZIP 发布与网络失败的提示。
 
 构建、测试与尚未完成项见 TODO.md。工具分发约定见 docs/tool-distribution.md。
+
+## 本地工具面板（0.2）
+
+已下载的 6 个 Max 工具位于开发目录 tools，并复制到本机 EXE 同级 tools 供使用。公共 ZIP 不包含这些工具。格式和能力边界见 docs/tool-panels.md。当前支持配置宿主、启动 Max、复制安装脚本、新启动 Max 并加载工具 UI；现有实例桥接及真实 Max 运行尚待验证。
+

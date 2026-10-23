@@ -6,12 +6,13 @@ from PySide6.QtCore import QThread, Signal, QLockFile, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QComboBox, QListWidget, QListWidgetItem, QInputDialog,
-    QMessageBox, QFileDialog, QSplitter, QProgressBar)
+    QMessageBox, QFileDialog, QSplitter, QProgressBar, QTabWidget)
+from tool_panels import ToolWorkspace
 from keyring.backends.Windows import WinVaultKeyring
 from core import ToolStore
 from packaging.version import Version, InvalidVersion
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 
 
 class Job(QThread):
@@ -38,7 +39,12 @@ class Window(QMainWindow):
         self.setWindowTitle('LXTool · 游戏制作工具架')
         self.resize(1120, 760)
         root = QWidget()
-        self.setCentralWidget(root)
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+        app_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent
+        self.workspace = ToolWorkspace(app_root / 'tools', store.root)
+        self.tabs.addTab(self.workspace, '工具工作区')
+        self.tabs.addTab(root, '工具架配置')
         layout = QVBoxLayout(root)
         layout.setContentsMargins(28, 24, 28, 24)
         title = QLabel('LXTool.   游戏制作工具架')
@@ -306,7 +312,7 @@ class Window(QMainWindow):
         self.busy(check, show)
 
     def closeEvent(self, event):
-        if self.job:
+        if self.job or self.workspace.pull_job:
             self.status.setText('后台任务进行中，请完成后关闭')
             event.ignore()
         else:
@@ -316,7 +322,7 @@ class Window(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
-    app.setStyleSheet('QWidget{background:#151c28;color:#e1e9f7;font:14px "Microsoft YaHei"} QPushButton,QLineEdit,QComboBox{padding:9px;background:#25334b;border:1px solid #405573;border-radius:5px} QPushButton:hover{background:#365c91} QPushButton:disabled{color:#68768c} QListWidget{background:#1c2738;border:1px solid #34435a;border-radius:6px} QListWidget::item{padding:12px} QListWidget::item:selected{background:#304f7c} QLabel{padding:4px} QProgressBar{max-height:12px}')
+    app.setStyleSheet('QWidget{background:#151c28;color:#e1e9f7;font:14px "Microsoft YaHei"} QPushButton,QLineEdit,QComboBox{padding:9px;background:#25334b;border:1px solid #405573;border-radius:5px} QPushButton:hover{background:#365c91} QPushButton:disabled{color:#68768c} QListWidget{background:#1c2738;border:1px solid #34435a;border-radius:6px} QListWidget::item{padding:12px} QListWidget::item:selected{background:#304f7c;color:#ffffff} QLabel{padding:4px} QProgressBar{max-height:12px}')
     root = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'LXTool'
     root.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(root / 'desktop.lock'))
@@ -330,3 +336,4 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
+
