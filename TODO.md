@@ -53,3 +53,5 @@
 真实 GitHub 目录分发和客户端升级验收依赖仓库提交与 Release。仓库当前为空。私有仓库端到端验收尚无测试资源。Git CLI 连接仓库出现 Connection reset，但 GitHub 连接器可读取仓库状态。
 
 2026-10-24 最终本地验证：8 项自动测试通过；pip check 通过；build.ps1 成功生成 dist/LXTool/LXTool.exe 和 dist/LXTool-windows-x64.zip。Qt 6.8.3 的打包程序实际启动正常，客户端更新查询返回无新发布并恢复操作控件。ZIP SHA-256：60FA47A66F83A3E8F459E138B3F630CB658FAB7C4DE38D6E62F70A81505A80AF。
+
+源码已提交到 gd-dd/LXTools main，提交 a10fe309fe8565e92776f177ad7f7159cb0e181b。打包客户端通过真实 GitHub 目录同步（当前为空目录）。GitHub Actions run 39997733890 已完成，结论 success（云端测试、打包及 Artifact 上传通过）。尚无 Release 与私有测试资源，相应端到端验证未完成。
