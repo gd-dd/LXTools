@@ -50,3 +50,35 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(window.library.data['assignments']['bake'],key)
             window.close()
 
+    def test_version_switch_uses_saved_environment_and_update_can_restart_after_job(self):
+        import json
+        import shutil
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            package,data=test_tool_panels.ToolPanelTests().fixture(root)
+            data['compatibility']={'range':'unverified','testedVersions':[]}
+            data['version']='1.0.0'
+            (package/'tool.json').write_text(json.dumps(data),'utf-8')
+            second=package.with_name('bake2');shutil.copytree(package,second)
+            newer=dict(data,version='2.0.0');(second/'tool.json').write_text(json.dumps(newer),'utf-8')
+            window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
+            window.catalog.data['packages']=[dict(t,repository='gd-dd/3dmaxScript',manifest=f"releases/unverified/{t['version']}/bake/tool.json") for t in (data,newer)]
+            window.host_version.setText('unsaved-invalid')
+            window.show_tool('bake')
+            window.release_list.setCurrentItem(window.release_list.topLevelItem(0))
+            with patch.object(window.workspace,'check_compatibility',return_value=True):window.activate_selected()
+            self.assertEqual(window.workspace.config['selectedVersions']['2026.3']['bake'],'2.0.0@unverified')
+            window.release_list.setCurrentItem(window.release_list.topLevelItem(1))
+            with patch.object(window.workspace,'check_compatibility',return_value=True):window.activate_selected()
+            self.assertEqual(window.workspace.config['selectedVersions']['2026.3']['bake'],'1.0.0@unverified')
+            with patch('desktop.subprocess.Popen') as popen, patch.object(window,'close') as close:
+                window.restart_updated(root/'staged')
+                popen.assert_called_once();close.assert_called_once()
+            window.job=object()
+            with patch('desktop.subprocess.Popen') as popen:
+                window.restart_updated(root/'staged')
+                popen.assert_not_called()
+            self.assertEqual(window.pending_restart,root/'staged')
+            window.job=None;window.close()
+

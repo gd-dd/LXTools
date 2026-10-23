@@ -294,7 +294,7 @@ class Window(QMainWindow):
         self.detail_title.setText(entry['name']);self.detail_description.setText(entry['description'])
         installed=[t for t in self.installed() if t['id']==identity]
         self.detail_badge.setText('3ds Max  /  '+entry.get('category','实用工具')+'  /  '+str(len(entries))+' 个释出版本')
-        state=compatibility_state(entry['compatibility'],self.host_version.text())
+        state=compatibility_state(entry['compatibility'],self.workspace.host_version.text())
         self.detail_help.setText('最新版 '+entry['version']+' · '+LABELS[state]+'\n'+entry.get('notes',''))
         newest_local=any(package_key(t)==package_key(entry) for t in installed)
         self.install_button.setText('已安装最新版本' if newest_local else '安装最新版本' if not installed else '更新到最新版本')
@@ -320,7 +320,7 @@ class Window(QMainWindow):
         self.detail_tabs.setCurrentIndex(1 if panel and installed else 0);self.pages.setCurrentWidget(self.detail)
 
     def active_key(self, identity, installed):
-        selected=self.workspace.config.get('selectedVersions',{}).get(self.host_version.text(),{}).get(identity)
+        selected=self.workspace.config.get('selectedVersions',{}).get(self.workspace.host_version.text(),{}).get(identity)
         return selected if any(package_key(t)==selected for t in installed) else (package_key(installed[0]) if installed else None)
 
     def selected_release(self):
@@ -331,7 +331,7 @@ class Window(QMainWindow):
     def release_selected(self,*_):
         if not self.release_list.currentItem():return
         selection=self.selected_release();entry,local=selection['entry'],selection['local']
-        state=compatibility_state(entry['compatibility'],self.host_version.text())
+        state=compatibility_state(entry['compatibility'],self.workspace.host_version.text())
         self.release_notes.setText(LABELS[state]+'\n'+entry.get('notes','作者未提供更新说明。'))
         self.download_button.setEnabled(not local and not entry.get('local_only') and state!='incompatible' and not self.job)
         active=self.active_key(entry['id'],[t for t in self.installed() if t['id']==entry['id']])
@@ -351,10 +351,11 @@ class Window(QMainWindow):
         if self.job:return
         if not self.workspace.check_compatibility(entry):return
         identity=entry['id'];version=package_key(entry)
+        selected_host=self.workspace.host_version.text()
         def done(_):
             self.workspace.choose_version(identity,version);self.show_tool(identity,True)
             self.status.setText('安装完成，已切换到 '+entry['version']+'。可在工具面板继续操作。')
-        self.busy(lambda:fetch_packages(entry['repository'],self.tools_root,self.host_version.text(),True,
+        self.busy(lambda:fetch_packages(entry['repository'],self.tools_root,selected_host,True,
                   manifest_path=entry['manifest'],commit=entry.get('commit')),done,'正在下载并校验工具…')
 
     def activate_selected(self):
@@ -371,7 +372,7 @@ class Window(QMainWindow):
         if not tool:raise ValueError('此版本未安装')
         if QMessageBox.question(self,'卸载工具版本','卸载 '+tool['name']+' '+tool['version']+'？\n会删除工具架内该版本的文件。此前复制到 Max 的脚本需在宿主目录自行管理。')!=QMessageBox.StandardButton.Yes:return
         self.library.uninstall(tool)
-        selected=self.workspace.config.get('selectedVersions',{}).get(self.host_version.text(),{})
+        selected=self.workspace.config.get('selectedVersions',{}).get(self.workspace.host_version.text(),{})
         if selected.get(tool['id'])==package_key(tool):selected.pop(tool['id'],None);self.workspace.save_config()
         self.show_tool(tool['id']);self.status.setText('此版本已卸载。其他版本和夹子保留。')
 
@@ -390,8 +391,7 @@ class Window(QMainWindow):
         else:self.render_cards()
         if self.pending_restart:
             stage=self.pending_restart;self.pending_restart=None
-            subprocess.Popen([str(stage/'LXTool.exe'),'--apply-update',str(Path(sys.executable).parent),str(os.getpid())],cwd=str(stage))
-            self.close()
+            self.guard(lambda:self.restart_updated(stage))
 
     def sync_catalog(self):
         def done(data):self.catalog.data=data;self.render_cards();self.status.setText('商店已更新 · '+str(len({e['id'] for e in data['packages']}))+' 款工具可供选择。')
@@ -402,6 +402,7 @@ class Window(QMainWindow):
         if filename:self.host_path.setText(filename)
 
     def save_host(self):
+        if self.job:raise ValueError('请等待当前下载或同步结束后保存环境')
         host_version(self.host_version.text())
         value=self.host_path.text().strip()
         if value and (not Path(value).is_file() or Path(value).name.lower()!='3dsmax.exe'):raise ValueError('请选择实际的 3dsmax.exe')
@@ -414,8 +415,15 @@ class Window(QMainWindow):
             if result is None:self.status.setText('未发现新的稳定发行版，当前 '+VERSION+'。');return
             tag,stage=result
             if not getattr(sys,'frozen',False):self.status.setText('已准备 '+tag+'；源码模式不自动替换，请使用 EXE 测试更新。');return
-            if QMessageBox.question(self,'安装工具架更新',tag+' 已下载并校验。现在关闭并更新工具架？已装工具和夹子会保留。')==QMessageBox.StandardButton.Yes:self.pending_restart=stage
+            if QMessageBox.question(self,'安装工具架更新',tag+' 已下载并校验。现在关闭并更新工具架？已装工具和夹子会保留。')==QMessageBox.StandardButton.Yes:self.restart_updated(stage)
         self.busy(lambda:prepare_update(self.store.root),done,'正在检查并准备工具架更新…')
+
+    def restart_updated(self,stage):
+        if self.job:
+            self.pending_restart=stage
+            return
+        subprocess.Popen([str(stage/'LXTool.exe'),'--apply-update',str(Path(sys.executable).parent),str(os.getpid())],cwd=str(stage))
+        self.close()
 
     def closeEvent(self,event):
         if self.job or self.workspace.pull_job:
