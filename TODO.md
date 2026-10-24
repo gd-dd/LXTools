@@ -234,3 +234,11 @@ GitHub Actions 40002103768 已完成，结论 success；人工验收与 Max 2026
 - [x] 未找到桌面和开始菜单中指向旧项目的快捷方式。
 - [ ] 旧空目录由 Codex/编辑器进程占用，关闭旧工作目录会话后才能移除。
 - 后续仅使用 E:\project\LXTools\LXTools；没有操作 Git 提交或远端。
+
+## 2026-10-25 GitHub Actions 路径兼容修复
+- [x] 读取失败运行 40115707249 / job 120936422703：Windows TEMP 的 RUNNER~1 与 runneradmin 字符串不同导致测试误报。
+- [x] 修复 tests/test_repository_protocol.py，预期的包文件路径使用 resolve()，保持程序路径和参数顺序断言。
+- [x] 默认临时目录下 39 项测试通过。
+- [x] 使用 GetShortPathNameW 得到真实 8.3 临时路径，39 项测试通过；日志 runtime/audit/ci-short-path-tests.log。
+- [ ] 作者手动 Commit / Push 后检查新云端构建；通过后继续发布 v0.5.0。
+- 只修改测试和此清单，客户端源码和现有发布包未变；未执行提交或推送。

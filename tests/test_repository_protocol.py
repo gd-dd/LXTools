@@ -53,7 +53,8 @@ class RepositoryProtocolTests(unittest.TestCase):
             tools,errors=discover_packages(root);self.assertEqual(len(tools),1);self.assertEqual(errors,[])
             executable=Path(root)/'editor.exe';executable.touch()
             args=action_arguments(tools[0],m['actions']['run'],{'editor':{'path':str(executable)}})
-            self.assertEqual(args,[str(executable),'--file',str(package/'payload.txt')])
+            # Package arguments are canonical paths; Windows TEMP may use an 8.3 alias.
+            self.assertEqual(args,[str(executable),'--file',str((package/'payload.txt').resolve())])
             target=Path(root)/'target';target.mkdir()
             copy_action(tools[0],m['actions']['copy'],target)
             self.assertEqual((target/'example'/'1.0.0'/'payload.txt').read_text(),'hello')
