@@ -1,4 +1,6 @@
 import base64
+import io
+import zipfile
 import hashlib
 import json
 import os
@@ -29,6 +31,17 @@ def fixture(root,version='1.0.0',panel_type='declarative'):
     assets=visual_assets(m,lambda p:(package/p).read_bytes())
     entry=entry_for(42,'gd-dd/example',m,'','a'*40,assets);entry['repositoryId']=42
     return package,m,entry
+
+
+def release_fixture(package,m,entry):
+    buffer=io.BytesIO()
+    with zipfile.ZipFile(buffer,'w',zipfile.ZIP_DEFLATED) as archive:
+        for path in [MARKER,*m['files']]:archive.writestr(path,(package/path).read_bytes())
+    data=buffer.getvalue()
+    asset={'id':123,'name':'LXTool-package.zip','size':len(data),'digest':'sha256:'+hashlib.sha256(data).hexdigest()}
+    release={'id':7,'tag_name':'v'+m['version'],'draft':False,'prerelease':False,'assets':[asset]}
+    entry.update(distribution='github-release',releaseId=7,releaseTag=release['tag_name'],releaseAsset=asset)
+    return data,release
 
 
 class RepositoryProtocolTests(unittest.TestCase):
@@ -72,11 +85,13 @@ class RepositoryProtocolTests(unittest.TestCase):
     def test_full_pagination_one_repo_one_tool_missing_marker_and_error_isolation(self):
         import urllib.error
         with tempfile.TemporaryDirectory() as root:
-            package,m,_=fixture(Path(root)/'fixture')
+            package,m,entry=fixture(Path(root)/'fixture')
+            _,release=release_fixture(package,m,entry)
             repo=lambda i:{'id':i,'full_name':'gd-dd/r'+str(i),'owner':{'login':'gd-dd'},'default_branch':'main'}
             pages=[[repo(i) for i in range(100)],[repo(100)]]
             def github(path,token=None):
                 if '/repos?' in path:return pages[0] if path.endswith('&page=1') else pages[1]
+                if '/releases?' in path:return [release]
                 return {'sha':'a'*40}
             def remote(repository,path,ref,token=None,limit=None):
                 if repository!='gd-dd/r42' or path=='.lxtool/releases.json':raise urllib.error.HTTPError('test',404,'missing',None,None)
@@ -91,14 +106,14 @@ class RepositoryProtocolTests(unittest.TestCase):
     def test_download_pinned_package_and_hash_failure(self):
         with tempfile.TemporaryDirectory() as root:
             root=Path(root);package,m,entry=fixture(root/'fixture')
-            def remote(repo,path,ref,token=None,limit=None):
-                self.assertEqual(ref,'a'*40);return (package/path).read_bytes()
-            with patch('repository_source.read_bytes',side_effect=remote):
+            data,release=release_fixture(package,m,entry)
+            with patch('repository_source.github_json',return_value=release),patch('repository_source.download_release_asset',return_value=data):
                 install_repository(entry,root/'installed')
                 self.assertEqual(len(discover_packages(root/'installed')[0]),1)
                 install_repository(entry,root/'installed')
-                (package/'payload.txt').write_text('tampered')
+                with patch('repository_source.download_release_asset',return_value=data.replace(b'PK',b'XX',1)):
+                    with self.assertRaises(Exception):install_repository(entry,root/'installed')
+                release['draft']=True
                 with self.assertRaises(ValueError):install_repository(entry,root/'installed')
             self.assertEqual(len(discover_packages(root/'installed')[0]),1)
             self.assertFalse(list((root/'installed').glob('.download-*')))
-

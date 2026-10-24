@@ -132,23 +132,24 @@ application 可包含 compatibility：`{"range":"2024.1~2026.3","testedVersions"
 
 在“发现工具”点击**图片图标**或“详情”进入介绍，默认渲染 README.md。工具面板仅从“我的工具”或夹子打开，打开后独占内容区，不混入概览或下载卸载管理。建议包括用途、截图说明、功能列表、使用步骤、依赖、兼容性及更新信息。当前支持文本、标题、列表、代码块和表格；介绍不会加载外部图片或本地文件，也不会自动打开链接。商店图标必须是单独图片文件，不能依赖 Markdown 的远程资源。
 
-## 7. 所有释出版本
+## 7. GitHub Releases 是唯一版本来源
 
-没有 releases.json 时，默认收录根目录 manifest 声明的当前版本。要提供历史版本与回退，作者必须保留历史包并添加索引：
+默认分支 `.lxtool/manifest.json` 仅用于发现 LX 工具身份，不代表已发布版本。
+客户端不再读取 `.lxtool/releases.json`，也不把默认分支当前版本自动视为发行。
 
-```json
-{
-  "schemaVersion": 2,
-  "releases": [
-    {"version":"1.0.0", "path":"releases/unverified/1.0.0"},
-    {"version":"1.1.0", "path":"releases/2024.1~2026.3/1.1.0"}
-  ]
-}
-```
+每个发行必须满足：
+- 已公开、非草稿、非 prerelease 的 GitHub Release。
+- 标签严格为 `v<major>.<minor>.<patch>`，例如 `v0.0.1`。
+- 标签对应提交根目录的 manifest.version 必须与标签一致。
+- 唯一附件 `LXTool-package.zip`，GitHub API 提供 `sha256:` 摘要。
+- ZIP 根目录直接包含 `.lxtool/manifest.json` 和 manifest.files 列出的文件，不包含外层文件夹、源码工程、tool.json 收据或未声明文件。
+- ZIP manifest 必须与标签提交的 manifest 一致。先编译、刷新摘要，再提交打标签；不能在打标签后重新编译导致摘要变化。
 
-每个 path 下都包含完整 `.lxtool/` 和自己的业务文件，manifest 的 version 必须与索引一致。空字符串 path 表示仓库根目录。索引中版本号不能重复。兼容目录命名是工具仓库自己的组织约定，通用工具可以采用 `releases/1.0.0`。
-
-客户端将列表和文件固定到同一个 Git commit 后下载，不下载未列入 files 的其他工程文件。安装位置是 `tools/<仓库名>--<仓库ID>/versions/<version>/`。更新保留旧包，版本页可切换回退和卸载。仓库内增加多少版本都不增加商店卡片。
+工具架从标签固定的 commit 读取图标、Markdown 和面板定义；安装只下载 Release ZIP，验证附件摘要以及包内每个文件摘要。
+公开历史 Release 保留即可供回退；不要覆盖同版本附件。改动图片、说明或面板也必须增加版本。
+`releases/` 历史副本不再进入默认分支；Git 历史保留源码，Release 附件保留可安装版本。
+兼容范围放在 manifest 的 applications.compatibility 和说明中，未经实测保持 unverified，不用历史目录命名充当发行版本。
+本地安装位置仍是 `tools/<仓库名>--<仓库ID>/versions/<version>/`，一仓库一商店条目。
 
 ## 8. 发布检查
 
@@ -156,7 +157,7 @@ application 可包含 compatibility：`{"range":"2024.1~2026.3","testedVersions"
 2. 明确软件依赖和动作；不需要面板则选择 none。
 3. 计算 files 中每个文件的真实摘要；更改面板/Markdown/图标也需要更新摘要。
 4. 验证所有动作引用存在，确认扫描和介绍不执行代码；native 仅在用户打开工具面板时导入，构造不自动启动宿主。
-5. 提交到 gd-dd 账户下的工具仓库默认分支；需要回退时同时维护 releases.json。
+5. 编译并校验，提交到默认分支，打版本标签并发布对应 GitHub Release ZIP；保留历史 Release。
 6. 客户端点击“扫描作者仓库”，核对一仓库一张卡片、图标和 Markdown。
 7. 在干净目录测试安装、执行、版本切换和卸载。
 

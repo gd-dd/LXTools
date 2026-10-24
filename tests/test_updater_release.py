@@ -12,7 +12,7 @@ from updater import prepare_update
 class ReleaseUpdateTests(unittest.TestCase):
     def test_old_client_selects_newest_stable_and_requires_digest(self):
         releases=[
-            {'tag_name':'v0.5.0','draft':False,'prerelease':False,'assets':[]},
+            {'tag_name':'v0.0.1','draft':False,'prerelease':False,'assets':[]},
             {'tag_name':'v3.0.0','draft':True,'prerelease':False,'assets':[]},
             {'tag_name':'v2.0.0','draft':False,'prerelease':True,'assets':[]},
             {'tag_name':'v0.6.0','draft':False,'prerelease':False,'assets':[{'name':'LXTool-windows-x64.zip','id':42,'digest':'sha256:'+'a'*64}]},

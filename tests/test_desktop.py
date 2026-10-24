@@ -19,13 +19,15 @@ class DesktopTests(unittest.TestCase):
     def test_one_repository_card_icon_opens_markdown_without_max_settings(self):
         with tempfile.TemporaryDirectory() as root:
             root=Path(root);window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
+            _,_,entry=fixtures.fixture(root/'fixture')
+            window.catalog.data['packages']=[entry];window.render_cards()
             window.show();self.app.processEvents()
             self.assertIn('1 款',window.summary.text())
             self.assertFalse(hasattr(window,'host_version'))
             self.assertNotIn('添加仓库',[b.text() for b in window.findChildren(QPushButton)])
             icons=[b for b in window.card_area.findChildren(QPushButton) if not b.icon().isNull()]
             self.assertEqual(len(icons),1);icons[0].click()
-            self.assertIn('包含功能',window.readme.toPlainText())
+            self.assertIn('通用工具',window.readme.toPlainText())
             self.assertFalse(window.detail_icon.pixmap().isNull())
             self.assertEqual(window.detail_icon.width(),160)
             self.assertEqual(window.pages.currentWidget(),window.detail)

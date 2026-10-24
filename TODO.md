@@ -242,3 +242,11 @@ GitHub Actions 40002103768 已完成，结论 success；人工验收与 Max 2026
 - [x] 使用 GetShortPathNameW 得到真实 8.3 临时路径，39 项测试通过；日志 runtime/audit/ci-short-path-tests.log。
 - [ ] 作者手动 Commit / Push 后检查新云端构建；通过后继续发布 v0.5.0。
 - 只修改测试和此清单，客户端源码和现有发布包未变；未执行提交或推送。
+
+## GitHub Releases 唯一发行来源 / 0.0.1
+- [ ] 工具扫描仅收录已公开稳定 Release，标签、manifest、附件版本一致。
+- [ ] 安装使用 Release ZIP，校验 GitHub SHA256、包清单和文件摘要；不再读取 releases.json。
+- [ ] 更新协议、制作 Skill 和打包校验器。
+- [ ] Max 工具集准备 0.0.1，删除默认分支内历史包（保留 Git 历史）。
+- [ ] 工具架 0.0.1 构建及测试，更新已发布 Release 和附件。
+- [ ] 真实扫描/安装与人工验收。

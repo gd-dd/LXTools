@@ -1,6 +1,6 @@
 # LXTool · 通用工具商店
 
-一个 GitHub 仓库就是一个工具。客户端自动分页扫描 **gd-dd** 的仓库，只有带有效 `.lxtool/manifest.json` 和对应资源的项目才进入商店。用户不添加仓库，按需安装作者发布的工具。
+一个 GitHub 仓库就是一个工具。客户端自动分页扫描 **gd-dd** 的仓库，只有带有效 `.lxtool/manifest.json` 和对应资源的项目才进入商店。用户不添加仓库，按需安装作者发布的工具。只有公开稳定 GitHub Release 才提供可安装版本，默认分支修改不会自动发布。
 
 ## 使用
 
@@ -22,7 +22,6 @@
   icon.png
   README.md
   panel.json
-  releases.json   # 可选历史版本列表
 ```
 
 `kind: lx-tool` 是格式声明，不是密码学认证。图标、Markdown、面板和业务文件都按清单摘要校验。扫描和浏览不会运行工具代码。
