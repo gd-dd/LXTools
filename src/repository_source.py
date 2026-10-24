@@ -58,7 +58,7 @@ def visual_assets(m,reader):
 
 
 def entry_for(repo_id,repository,m,prefix,commit,assets):
-    return dict(m,id='repo-'+str(repo_id),repository=repository,packagePath=prefix,commit=commit,
+    return dict(m,id='repo-'+str(repo_id),repositoryId=repo_id,repository=repository,packagePath=prefix,commit=commit,
                 manifestData=m,notes=m.get('releaseNotes','作者未提供更新说明。'),**assets)
 
 

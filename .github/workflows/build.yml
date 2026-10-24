@@ -57,6 +57,7 @@ jobs:
       - name: Publish verified Release assets
         shell: pwsh
         env:
+          FIRST_RELEASE_CORRECTION_FROM: '074484aa8f3a772aecf596603cdc37ddfa5ba0b7'
           GH_TOKEN: ${{ github.token }}
           PYTHONUTF8: '1'
         run: python scripts/publish_release.py

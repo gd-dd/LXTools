@@ -31,6 +31,9 @@ class GitHubReleaseTests(unittest.TestCase):
                 catalog=RepositoryCatalog(root/'cache');result=catalog.sync()
                 self.assertEqual([p['version'] for p in result['packages']],['1.0.0'])
                 self.assertEqual(len(result['warnings']),1)
+                with patch('repository_source.github_json',return_value=release),patch('repository_source.download_release_asset',return_value=data):
+                    install_repository(result['packages'][0],root/'installed')
+                self.assertEqual(len(f.discover_packages(root/'installed')[0]),1)
                 catalog.data=result;pages=[[]]
                 self.assertEqual(catalog.sync()['packages'],[])
 
