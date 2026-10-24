@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
-from tool_panels import discover_tools, install_script, launch_arguments, ToolWorkspace
+from legacy.tool_panels import discover_tools, install_script, launch_arguments, ToolWorkspace
 
 
 class ToolPanelTests(unittest.TestCase):
@@ -53,4 +53,3 @@ class ToolPanelTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 workspace.launch()
             workspace.close()
-

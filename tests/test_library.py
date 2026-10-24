@@ -5,9 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from library import Library,AuthorCatalog,validate_catalog
-from tool_source import fetch_packages
-from tool_panels import discover_tools
+from library import Library
+from legacy.catalog import AuthorCatalog,validate_catalog
+from legacy.tool_source import fetch_packages
+from legacy.tool_panels import discover_tools
 from updater import replace_program
 
 
@@ -40,7 +41,7 @@ class LibraryTests(unittest.TestCase):
                 self.assertIn('?ref='+commit,path)
                 key=path.split('/contents/')[1].split('?')[0]
                 return {'encoding':'base64','content':base64.b64encode(payload[key]).decode()}
-            with patch('tool_source.github_json',side_effect=remote):
+            with patch('legacy.tool_source.github_json',side_effect=remote):
                 fetch_packages(repo,root/'tools','2026.3',True,manifest_path=packages[0]['manifest'],commit=commit)
                 tools,errors=discover_tools(root/'tools');self.assertEqual(len(tools),1);self.assertEqual(errors,[])
                 fetch_packages(repo,root/'tools','2026.3',True,manifest_path=packages[1]['manifest'],commit=commit)
@@ -76,4 +77,3 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual((target/'LXTool.exe').read_text(),'new')
             self.assertEqual((target/'tools'/'keep').read_text(),'user tools')
             self.assertEqual((backup/'LXTool.exe').read_text(),'old')
-

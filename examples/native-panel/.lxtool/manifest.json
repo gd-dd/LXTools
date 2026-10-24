@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "kind": "lx-tool",
+  "name": "自定义面板示例",
+  "description": "工具自有布局、交互、样式与配置示例",
+  "version": "1.0.0",
+  "category": "开发示例",
+  "icon": ".lxtool/icon.png",
+  "readme": ".lxtool/README.md",
+  "panel": ".lxtool/panel.json",
+  "applications": {},
+  "actions": {},
+  "files": {
+    ".lxtool/icon.png": "4bec778c038aed4a7e8adb14c781996de753f43d5999156c465d69243a86f23f",
+    ".lxtool/README.md": "d4a9df5cc5555b52f3fbc751b4962e9a8481333a2efc44c262c08ee982c5dffe",
+    ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
+    "ui/panel.py": "a961c5ecc00997fd3585c2d5008693175c2a5d36dd0f9a00a257438a62e82af8",
+    "ui/strings.py": "0c818542d5f36ebdbad95e732c1842bb3a6f76e6171a586b10cdc9908031733d"
+  }
+}

@@ -18,4 +18,3 @@ class CompatibilityTests(unittest.TestCase):
         for value in ('2026.3~2024.1', '../other', '2026.3'):
             with self.assertRaises(ValueError):
                 compatibility_state({'range': value}, '2026.3')
-

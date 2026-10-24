@@ -28,4 +28,3 @@ def compatibility_state(compatibility, selected):
 
 
 LABELS = {'unverified': '兼容性待验证', 'incompatible': '不支持所选软件版本', 'declared': '范围内 · 尚无此版本实测记录', 'tested': '此软件版本已实测'}
-

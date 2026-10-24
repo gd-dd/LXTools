@@ -1,43 +1,53 @@
-# LXTool · 游戏制作工具商店
+# LXTool · 通用工具商店
 
-Windows 桌面客户端。打开即可浏览作者维护的工具目录，按需安装；无需填写仓库地址，也不提供用户添加仓库功能。GitHub 是分发后台，不是日常操作入口。
-
-## 启动
-
-运行 `dist/LXTool/LXTool.exe`，或双击 `start.bat`。首次启动展示内置目录并自动刷新；网络不可用时保留上次目录，本地工具仍可使用。
+一个 GitHub 仓库就是一个工具。客户端自动分页扫描 **gd-dd** 的仓库，只有带有效 `.lxtool/manifest.json` 和对应资源的项目才进入商店。用户不添加仓库，按需安装作者发布的工具。
 
 ## 使用
 
-- **发现工具**：搜索、按用途筛选，查看工具详情与兼容信息，安装到本地。
-- **我的工具**：查看已安装工具，打开工具自己定义的面板。
-- **我的夹子**：新建中文夹子，重命名或移除；在工具详情右上角选择收纳位置。移除夹子不删除工具。
-- **版本与卸载**：列出作者索引中的全部释出版本及本地版本，显示兼容范围、安装状态、日期和更新说明。可安装历史版本、切换/回退或卸载单个版本。
-- **设置与更新**：设置 3ds Max 路径与软件版本；检查客户端发行版，下载校验后确认更新并重启。
+启动 `dist/LXTool/LXTool.exe` 或 `start.bat`。
 
-六个现有 Max 脚本目前各有一个收录版本，全部标为“待验证”；不会虚构历史版本、发布日期或兼容测试结果。插件实际运行依赖本机安装的 Max。启动插件会新开 Max 实例，尚不支持向已有 Max 实例发命令。
+- **发现工具**：按分类、关键词、已下载 / 未下载 / 可更新筛选，卡片直接下载、更新、卸载全部版本。点击图标查看 Markdown 介绍，“版本与卸载”用于选择版本、回退或卸载单个版本。这里没有运行面板入口。
+- **我的工具**：只列出已下载工具。点击图标或“打开工具”直接进入独立完整面板；面板页没有概览、下载、卸载或版本管理页签，只保留返回、工具名称、夹子归属和工具本身的内容。
+- **我的夹子**：中文收纳，点击夹子后仍走“我的工具”直接打开面板。下载完成后请主动进入“我的工具”使用。
 
-## 数据位置
+工具架不绑定 Max、Unity 或特定宿主。软件路径、启动参数、复制安装操作和面板由各个工具定义；工具架只提供通用下载、渲染和动作执行。
 
-- 工具包：EXE 同级 `tools/`；开发环境为根目录 `tools/`。不提交到工具架仓库，不打进公共 ZIP。
-- 夹子、环境、目录缓存：`%LOCALAPPDATA%/LXTool/`。
-- 工具卸载仅删除工具架内选中的版本，不移除曾复制到 Max 用户脚本目录的文件。
-- 客户端更新只替换 `LXTool.exe` 和 `_internal`，保留工具和个人设置；失败尝试回滚，旧程序保留在同级 `.lxtool-backup-*`。
+## 工具开发
 
-## 作者维护
+以 [LX 工具仓库规范 v2](docs/lx-tool-v2.md) 为准。旧 v1 文档仅供历史参考。
 
-[工具开发规范](docs/tool-authoring.md) · [商店与发布](docs/store-publishing.md) · [OAuth 注册指南](docs/github-login-setup.md)
-
-作者在 `catalog/store.json` 登记工具源。每个工具源根目录维护 `tools-index.json` 和兼容范围目录。客户端从作者目录自动发现新增工具/版本。用户界面没有编辑来源的入口。
-
-工具面板支持声明式内容及 `none` 模式，可自定义分组、文本、按钮和强调色；插件原有 UI 不变。
-
-## 构建与验证
-
-```powershell
-.\build.ps1
+```text
+工具仓库/.lxtool/
+  manifest.json
+  icon.png
+  README.md
+  panel.json
+  releases.json   # 可选历史版本列表
 ```
 
-使用锁定的依赖安装环境，执行 unittest，再通过 PyInstaller 构建 Windows EXE 和 ZIP。商店只打包目录元数据，不包含工具业务代码。公共分发文件为 `dist/LXTool-windows-x64.zip`。
+`kind: lx-tool` 是格式声明，不是密码学认证。图标、Markdown、面板和业务文件都按清单摘要校验。扫描和浏览不会运行工具代码。
 
-GitHub 账户登录尚未启用：需作者注册 OAuth App 并开启 Device Flow，再接入 Client ID。公开商店不依赖登录。
+当前示例 `gd-dd/3dmaxScript` 合并显示为“Max 工具集”，包含六个脚本功能。Max 的启动命令由这个工具自己的 manifest 声明。当前兼容性待实测。
 
+## 文件位置与更新
+
+- 工具：EXE 同级 `tools/<仓库名>--<repositoryId>/versions/<version>/`。
+- 个人配置：`%LOCALAPPDATA%/LXTool/`。软件配置按工具隔离。
+- 工具代码不进入工具架仓库或公共 ZIP，只内置商店展示快照。
+- 旧版六个脚本目录已归档到 runtime/backups/legacy-installed/，不会再作为当前工具目录。
+- 客户端自更新保留 tools 和个人配置。软件目录之外的插件副本需自行管理。
+
+## 构建
+
+运行 `./build.ps1`，会执行自动测试和 PyInstaller 打包，输出 `dist/LXTool-windows-x64.zip`。
+
+公开仓库可直接扫描。私有仓库需要后续接入 GitHub 账户授权；OAuth 尚未配置，见 [注册准备](docs/github-login-setup.md)。
+
+## 导航
+
+完整目录与职责见 [文件结构](docs/file-structure.md)。当前作者协议只看 docs/lx-tool-v2.md；旧文档在 docs/history/，旧适配代码在 src/legacy/，早期网页原型与旧商店样例在 archive/。
+
+
+完整自定义面板：阅读 [native API 1](docs/custom-panel-api.md)，可运行模板在 `examples/native-panel/`。模板不会自动加入用户商店。
+
+Windows 安装包：运行 `./build-installer.ps1`（需要 Inno Setup 6.7 或更高的 6.x 版本），输出安装 EXE、更新 ZIP 和 SHA256SUMS.txt。首次发布请逐步阅读 [Release 教程](docs/first-release.md)。

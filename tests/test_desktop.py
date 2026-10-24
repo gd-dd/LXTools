@@ -4,81 +4,111 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
-from PySide6.QtWidgets import QApplication,QPushButton
+from PySide6.QtWidgets import QApplication,QPushButton,QLineEdit
 from desktop import Window
 from core import ToolStore
-import test_tool_panels
+import test_repository_protocol as fixtures
 
 
 class DesktopTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
 
-    def test_author_store_search_no_user_repository_and_folders(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory)
-            window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
+    def test_one_repository_card_icon_opens_markdown_without_max_settings(self):
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root);window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
             window.show();self.app.processEvents()
-            self.assertEqual(window.pages.currentWidget(),window.browse)
-            self.assertIn('6 款',window.summary.text())
+            self.assertIn('1 款',window.summary.text())
+            self.assertFalse(hasattr(window,'host_version'))
             self.assertNotIn('添加仓库',[b.text() for b in window.findChildren(QPushButton)])
-            window.search.setText('不存在');self.assertIn('0 款',window.summary.text())
-            window.search.clear();window.category.setCurrentText('建模');self.assertIn('1 款',window.summary.text())
-            window.category.setCurrentIndex(0)
-            key=window.library.create_folder('角色动画');window.refresh_folders();window.folders.setCurrentRow(0)
-            self.assertEqual(window.browse_title.text(),'角色动画')
-            self.assertIn('0 款',window.summary.text())
-            window.show_tool('animation-bake')
-            self.assertEqual(window.release_list.topLevelItemCount(),1)
-            self.assertEqual(window.release_list.topLevelItem(0).text(2),'未安装')
-            self.assertFalse(window.detail_tabs.isTabEnabled(1))
+            icons=[b for b in window.card_area.findChildren(QPushButton) if not b.icon().isNull()]
+            self.assertEqual(len(icons),1);icons[0].click()
+            self.assertIn('包含功能',window.readme.toPlainText())
+            self.assertFalse(window.detail_icon.pixmap().isNull())
+            self.assertEqual(window.detail_icon.width(),160)
+            self.assertEqual(window.pages.currentWidget(),window.detail)
+            self.assertEqual([window.detail_tabs.tabText(i) for i in range(window.detail_tabs.count())],['概览','版本与卸载'])
+            self.assertFalse(hasattr(window,'panel_button'))
             window.close()
 
-    def test_local_panel_and_release_list(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory)
-            package,data=test_tool_panels.ToolPanelTests().fixture(root)
+    def test_generic_panel_versions_and_chinese_folders(self):
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root);_,_,one=fixtures.fixture(root/'tools','1.0.0');_,_,two=fixtures.fixture(root/'tools','2.0.0')
             window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
-            window.catalog.data['packages']=[dict(data,repository='gd-dd/3dmaxScript',compatibility={'range':'unverified','testedVersions':[]},manifest='releases/unverified/abc/bake/tool.json')]
-            window.navigate('library');window.show_tool('bake',True)
-            self.assertEqual(window.detail_tabs.currentIndex(),1)
-            self.assertTrue(window.detail_tabs.isTabEnabled(1))
-            self.assertEqual(window.release_list.topLevelItem(0).text(2),'使用中')
-            key=window.library.create_folder('测试夹子');window.show_tool('bake')
-            window.move_combo.setCurrentIndex(1)
-            self.assertEqual(window.library.data['assignments']['bake'],key)
+            window.catalog.data['packages']=[one,two];window.show_tool('repo-42')
+            self.assertEqual(window.release_list.topLevelItemCount(),2)
+            window.navigate('library');window.open_tool_panel('repo-42')
+            self.assertEqual(window.pages.currentWidget(),window.tool_panel)
+            self.assertEqual([b.text() for b in window.workspace.findChildren(QPushButton) if b.text()=='运行编辑器'],['运行编辑器'])
+            window.show_tool('repo-42');window.release_list.setCurrentItem(window.release_list.topLevelItem(0));window.activate_selected()
+            self.assertEqual(window.workspace.config['selectedVersions']['repo-42'],'2.0.0')
+            window.release_list.setCurrentItem(window.release_list.topLevelItem(1));window.activate_selected()
+            self.assertEqual(window.workspace.config['selectedVersions']['repo-42'],'1.0.0')
+            key=window.library.create_folder('中文夹子');window.navigate('library');window.open_tool_panel('repo-42');window.move_combo.setCurrentIndex(1)
+            self.assertEqual(window.library.data['assignments']['repo-42'],key)
+            window.navigate('library',key);self.assertIn('1 款',window.summary.text())
+            with patch('desktop.subprocess.Popen') as popen,patch.object(window,'close') as close:
+                window.restart_updated(root/'staged');popen.assert_called_once();close.assert_called_once()
             window.close()
 
-    def test_version_switch_uses_saved_environment_and_update_can_restart_after_job(self):
-        import json
-        import shutil
-        from unittest.mock import patch
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory)
-            package,data=test_tool_panels.ToolPanelTests().fixture(root)
-            data['compatibility']={'range':'unverified','testedVersions':[]}
-            data['version']='1.0.0'
-            (package/'tool.json').write_text(json.dumps(data),'utf-8')
-            second=package.with_name('bake2');shutil.copytree(package,second)
-            newer=dict(data,version='2.0.0');(second/'tool.json').write_text(json.dumps(newer),'utf-8')
+    def test_card_uses_tool_owned_icon_and_groups_versions(self):
+        import base64
+        from PySide6.QtGui import QPixmap
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root)
+            _,_,one=fixtures.fixture(root/'tools','1.0.0')
+            _,_,two=fixtures.fixture(root/'tools','2.0.0')
             window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
-            window.catalog.data['packages']=[dict(t,repository='gd-dd/3dmaxScript',manifest=f"releases/unverified/{t['version']}/bake/tool.json") for t in (data,newer)]
-            window.host_version.setText('unsaved-invalid')
-            window.show_tool('bake')
-            window.release_list.setCurrentItem(window.release_list.topLevelItem(0))
-            with patch.object(window.workspace,'check_compatibility',return_value=True):window.activate_selected()
-            self.assertEqual(window.workspace.config['selectedVersions']['2026.3']['bake'],'2.0.0@unverified')
-            window.release_list.setCurrentItem(window.release_list.topLevelItem(1))
-            with patch.object(window.workspace,'check_compatibility',return_value=True):window.activate_selected()
-            self.assertEqual(window.workspace.config['selectedVersions']['2026.3']['bake'],'1.0.0@unverified')
-            with patch('desktop.subprocess.Popen') as popen, patch.object(window,'close') as close:
-                window.restart_updated(root/'staged')
-                popen.assert_called_once();close.assert_called_once()
-            window.job=object()
-            with patch('desktop.subprocess.Popen') as popen:
-                window.restart_updated(root/'staged')
-                popen.assert_not_called()
-            self.assertEqual(window.pending_restart,root/'staged')
-            window.job=None;window.close()
+            window.catalog.data['packages']=[one,two];window.render_cards()
+            self.app.sendPostedEvents();self.app.processEvents()
+            buttons=[window.cards.itemAt(i).widget().findChild(QPushButton,'brandIcon') for i in range(window.cards.count()) if window.cards.itemAt(i).widget()]
+            buttons=[b for b in buttons if b is not None]
+            self.assertEqual(len(buttons),1)
+            expected=QPixmap();expected.loadFromData(base64.b64decode(two['iconData']))
+            self.assertEqual(buttons[0].icon().pixmap(16,16).toImage(),expected.toImage())
+            buttons[0].click();self.assertEqual(window.release_list.topLevelItemCount(),2)
+            window.close()
 
+    def test_store_filters_and_library_icon_opens_only_full_panel(self):
+        from PySide6.QtWidgets import QTabWidget
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root)
+            _,_,one=fixtures.fixture(root/'tools','1.0.0')
+            _,_,two=fixtures.fixture(root/'remote','2.0.0')
+            window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
+            window.catalog.data['packages']=[one,two];window.navigate('store')
+            for state,count in [('已下载',1),('未下载',0),('可更新',1)]:
+                window.install_filter.setCurrentText(state)
+                self.assertTrue(window.summary.text().startswith(str(count)+' 款'))
+            with self.assertRaises(ValueError):window.open_tool_panel('repo-42')
+            window.navigate('library')
+            self.assertTrue(window.summary.text().startswith('1 款'))
+            card=window.cards.itemAt(0).widget()
+            self.assertEqual([b.text() for b in card.findChildren(QPushButton) if b.text()],['打开工具'])
+            card.findChild(QPushButton,'brandIcon').click()
+            self.assertEqual(window.pages.currentWidget(),window.tool_panel)
+            self.assertEqual(window.tool_panel.findChildren(QTabWidget),[])
+            self.assertFalse(window.detail.isVisible())
+            self.assertEqual(window.workspace.current['version'],'1.0.0')
+            window.show_tool('repo-42')
+            with patch.object(window,'busy',side_effect=lambda fn,done,message:done(None)):
+                window.install_entry(two)
+            self.assertEqual(window.pages.currentWidget(),window.detail)
+            window.close()
+
+    def test_store_uninstall_all_versions_and_cancel(self):
+        from PySide6.QtWidgets import QMessageBox
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root)
+            _,_,one=fixtures.fixture(root/'tools','1.0.0')
+            _,_,two=fixtures.fixture(root/'tools','2.0.0')
+            window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
+            window.catalog.data['packages']=[one,two];window.navigate('store')
+            with patch('desktop.QMessageBox.question',return_value=QMessageBox.No):window.uninstall_tool('repo-42')
+            self.assertEqual(len(window.installed()),2)
+            with patch('desktop.QMessageBox.question',return_value=QMessageBox.Yes):window.uninstall_tool('repo-42')
+            self.assertEqual(window.installed(),[])
+            window.navigate('library');self.assertTrue(window.summary.text().startswith('0 款'))
+            window.close()

@@ -4,14 +4,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from PySide6.QtWidgets import QApplication, QPushButton, QLabel
-from panel_spec import validate_panel, panel_for
-from tool_panels import ToolWorkspace, discover_tools
+from legacy.panel_spec import validate_panel, panel_for
+from legacy.tool_panels import ToolWorkspace, discover_tools
 import test_tool_panels
 
 
 class PanelContractTests(unittest.TestCase):
     def test_examples_and_legacy(self):
-        for path in Path('docs/examples').glob('tool-*.json'):
+        for path in Path('docs/history/examples').glob('tool-*.json'):
             panel_for(json.loads(path.read_text('utf-8')))
         self.assertEqual(panel_for({})['type'], 'declarative')
         self.assertEqual(validate_panel({'type': 'none'}), {'type': 'none'})
@@ -52,5 +52,4 @@ class PanelContractTests(unittest.TestCase):
             self.assertEqual(tools,[])
             self.assertIn('panel.type',errors[0])
             workspace.close()
-
 

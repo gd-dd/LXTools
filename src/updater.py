@@ -10,7 +10,7 @@ import uuid
 from packaging.version import Version, InvalidVersion
 from core import ToolStore
 
-VERSION = '0.3.0'
+VERSION = '0.5.0'
 
 
 def prepare_update(root, token=None):
@@ -104,4 +104,3 @@ def apply_update(stage, target, pid):
         ctypes.windll.user32.MessageBoxW(None, '更新未完成，旧程序已尽可能保留。\n' + str(error), 'LXTool 更新', 0x10)
         return 1
     return 0
-

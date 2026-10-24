@@ -16,4 +16,3 @@
 - [OAuth 最佳实践](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/best-practices-for-creating-an-oauth-app)
 
 核对日期：2026-10-24。
-

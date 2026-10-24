@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "my-max-tool",
+  "name": "我的 Max 工具",
+  "description": "说明用途和使用条件",
+  "host": "3dsmax",
+  "entry": "main.ms",
+  "version": "1.0.0",
+  "sha256": "替换为 main.ms 的 SHA-256",
+  "files": {
+    "main.ms": "替换为 main.ms 的 SHA-256"
+  },
+  "compatibility": {
+    "range": "unverified",
+    "testedVersions": []
+  },
+  "panel": {
+    "type": "declarative",
+    "title": "工具操作",
+    "sections": [
+      {
+        "title": "使用说明",
+        "text": "先在 Max 中选择需要处理的对象；插件原有界面保持不变。"
+      },
+      {
+        "title": "安装与启动",
+        "actions": [
+          {
+            "action": "launchHost",
+            "label": "启动 3ds Max"
+          },
+          {
+            "action": "installPlugin",
+            "label": "安装此工具"
+          },
+          {
+            "action": "openPluginUI",
+            "label": "启动 Max 并打开插件"
+          }
+        ]
+      }
+    ]
+  }
+}
