@@ -25,24 +25,15 @@ assets=[Path('dist')/n for n in names]
 for asset in assets:
     if not asset.is_file():raise RuntimeError('Missing asset: '+str(asset))
 tag='v'+version
-# One-time repair of the initial 0.0.1 delivery, before acceptance. Never applies to later versions.
-correction_from=os.environ.get('FIRST_RELEASE_CORRECTION_FROM','')
-correction=False
 try:
     ref=api('GET',f'/repos/{repo}/git/ref/tags/{tag}')
-    if ref['object']['sha']!=sha:
-        correction=(repo=='gd-dd/LXTools' and version=='0.0.1' and ref['object']['sha']==correction_from and correction_from=='074484aa8f3a772aecf596603cdc37ddfa5ba0b7')
-        if not correction:raise RuntimeError('Tag already points to another commit; refusing to move it')
-        api('PATCH',f'/repos/{repo}/git/refs/tags/{tag}',{'sha':sha,'force':True})
+    if ref['object']['sha']!=sha:raise RuntimeError('Tag already points to another commit; refusing to move it')
 except urllib.error.HTTPError as error:
     if error.code!=404:raise
     api('POST',f'/repos/{repo}/git/refs',{'ref':'refs/tags/'+tag,'sha':sha})
 releases=api('GET',f'/repos/{repo}/releases?per_page=100')
 release=next((r for r in releases if r['tag_name']==tag),None)
-# Explicit one-time correction requested by the author. Preserve the release page ID.
-if release is None and repo=='gd-dd/LXTools' and version=='0.0.1':
-    release=next((r for r in releases if r['id']==422710822 and r['tag_name']=='v0.5.0'),None)
-if release and release['tag_name']==tag and not release['draft'] and not correction:
+if release and release['tag_name']==tag and not release['draft']:
     raise RuntimeError('Version is already published; never overwrite published assets')
 fields={'tag_name':tag,'target_commitish':sha,'name':title,'body':notes,'draft':True,'prerelease':False}
 if release:

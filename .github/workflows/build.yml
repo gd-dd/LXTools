@@ -41,7 +41,7 @@ jobs:
 
   publish:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish) || contains(github.event.head_commit.message, '[publish v0.0.1]')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: windows-latest
     permissions:
       contents: write
@@ -57,7 +57,6 @@ jobs:
       - name: Publish verified Release assets
         shell: pwsh
         env:
-          FIRST_RELEASE_CORRECTION_FROM: '074484aa8f3a772aecf596603cdc37ddfa5ba0b7'
           GH_TOKEN: ${{ github.token }}
           PYTHONUTF8: '1'
         run: python scripts/publish_release.py
