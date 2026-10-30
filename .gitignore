@@ -6,3 +6,6 @@ dist/
 *.spec
 /tools/
 /runtime/
+
+# Local Windows shortcuts
+*.lnk

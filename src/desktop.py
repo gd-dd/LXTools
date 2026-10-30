@@ -1,6 +1,7 @@
 """LXTool: author-curated tool store and desktop workspace."""
 import os
 import base64
+import json
 import sys
 import subprocess
 from pathlib import Path
@@ -9,7 +10,7 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QPushButton, QLineEdit, QComboBox, QListWidget, QListWidgetItem,
     QInputDialog, QMessageBox, QFileDialog, QProgressBar, QStackedWidget, QFrame,
-    QScrollArea, QTabWidget, QTreeWidget, QTreeWidgetItem, QTextBrowser)
+    QScrollArea, QTreeWidget, QTreeWidgetItem, QTextBrowser, QLayout, QHeaderView, QSizePolicy)
 from packaging.version import Version, InvalidVersion
 from core import ToolStore
 from repository_panels import RepositoryWorkspace as ToolWorkspace
@@ -18,9 +19,10 @@ from library import Library
 from repository_source import RepositoryCatalog as AuthorCatalog, install_repository
 from updater import VERSION, prepare_update, apply_update
 from brand import icon_path
-from gold_effect import GoldButton,GoldTabBar
+from gold_effect import GoldButton
 
 from theme import STYLE
+import development
 
 
 def label(text, kind=None):
@@ -39,10 +41,49 @@ def version_order(entry):
         return 0, entry.get('publishedAt', '') + entry['version']
 
 
+class PageScroll(QScrollArea):
+    """One scroll surface for all page content, without a height cap."""
+    def __init__(self):
+        super().__init__()
+        self.setWidgetResizable(True)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.content = QWidget()
+        self.setWidget(self.content)
+        self.page_layout = QVBoxLayout(self.content)
+        self.page_layout.setContentsMargins(0, 0, 16, 12)
+        self.page_layout.setSpacing(18)
+        self.page_layout.setSizeConstraint(QLayout.SetMinAndMaxSize)
+        self.page_layout.setAlignment(Qt.AlignTop)
+
+
 class MarkdownView(QTextBrowser):
+    def __init__(self):
+        super().__init__()
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.document().documentLayout().documentSizeChanged.connect(self.fit_content)
+
+    def fit_content(self, *_):
+        height = int(self.document().size().height()) + 2 * self.frameWidth() + 32
+        if self.height() != height:
+            self.setFixedHeight(max(60, height))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_content()
+
+    def wheelEvent(self, event):
+        event.ignore()
+
     def loadResource(self, kind, url):
         # Documentation never fetches remote images or local file URLs.
         return None
+
+
+class ReleaseList(QTreeWidget):
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 class Job(QThread):
@@ -67,6 +108,8 @@ class Window(QMainWindow):
     def __init__(self, store, tools_root=None, autoload=True):
         super().__init__()
         self.store, self.job = store, None
+        self.development = development.enabled()
+        self.display_version = "0.0.0 · 本地开发" if self.development else VERSION
         app_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
         self.tools_root = Path(tools_root) if tools_root else app_root / 'tools'
         self.catalog = AuthorCatalog(store.root)
@@ -75,7 +118,7 @@ class Window(QMainWindow):
         self.view_mode = 'store'
         self.folder_id = None
         self.pending_restart = None
-        self.setWindowTitle('LXTool · 创作工具商店')
+        self.setWindowTitle('LXTool · '+('0.0.0 本地开发' if self.development else '创作工具商店'))
         self.setWindowIcon(QIcon(str(icon_path())))
         self.resize(1280, 840)
         self.setMinimumSize(1040, 720)
@@ -107,7 +150,7 @@ class Window(QMainWindow):
         side.addLayout(folder_actions)
         side.addStretch()
         side.addWidget(label('作者精选 · 按需安装', 'subtitle'))
-        side.addWidget(label('LXTool  ' + VERSION, 'subtitle'))
+        side.addWidget(label('LXTool  ' + self.display_version, 'subtitle'))
         root_layout.addWidget(sidebar)
         body=QWidget(); body_layout=QVBoxLayout(body);body_layout.setContentsMargins(28,24,28,16)
         self.pages=QStackedWidget();body_layout.addWidget(self.pages,1)
@@ -120,7 +163,14 @@ class Window(QMainWindow):
         self.build_settings()
         self.refresh_folders()
         self.navigate('store')
-        if autoload and QApplication.platformName() != 'offscreen':
+        if self.development:
+            self.project_root=app_root
+            self.dev_stamp=development.fingerprint(app_root)
+            self.dev_pending=None
+            self.dev_timer=QTimer(self);self.dev_timer.timeout.connect(self.check_development);self.dev_timer.start(1000)
+            self.navigate('store')
+            if autoload:QTimer.singleShot(1000,self.sync_catalog)
+        if autoload and not self.development and QApplication.platformName() != 'offscreen':
             QTimer.singleShot(300, self.sync_catalog)
 
     def button(self, text, fn, kind=None):
@@ -134,7 +184,7 @@ class Window(QMainWindow):
         except Exception as error:self.status.setText(str(error))
 
     def build_browse(self):
-        self.browse=QWidget();layout=QVBoxLayout(self.browse);layout.setContentsMargins(0,0,0,0);layout.setSpacing(18)
+        self.browse=PageScroll();layout=self.browse.page_layout
         row=QHBoxLayout();self.browse_title=label('发现工具','title');row.addWidget(self.browse_title,1)
         self.sync_button=self.button('扫描作者仓库',self.sync_catalog);row.addWidget(self.sync_button);layout.addLayout(row)
         self.hero=QFrame();self.hero.setObjectName('hero');hero=QVBoxLayout(self.hero);hero.setContentsMargins(24,20,24,20)
@@ -146,12 +196,11 @@ class Window(QMainWindow):
         self.install_filter=QComboBox();self.install_filter.addItems(['全部状态','已下载','未下载','可更新']);self.install_filter.currentTextChanged.connect(self.render_cards);row.addWidget(self.install_filter)
         layout.addLayout(row)
         self.summary=label('','subtitle');layout.addWidget(self.summary)
-        scroll=QScrollArea();scroll.setWidgetResizable(True)
-        self.card_area=QWidget();self.cards=QGridLayout(self.card_area);self.cards.setSpacing(16);self.cards.setContentsMargins(0,0,8,0)
-        scroll.setWidget(self.card_area);layout.addWidget(scroll,1);self.pages.addWidget(self.browse)
+        self.card_area=QWidget();self.card_area.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Maximum);self.cards=QGridLayout(self.card_area);self.cards.setSpacing(16);self.cards.setContentsMargins(0,0,8,0)
+        layout.addWidget(self.card_area);self.pages.addWidget(self.browse)
 
     def build_detail(self):
-        self.detail=QWidget();layout=QVBoxLayout(self.detail);layout.setContentsMargins(0,0,0,0);layout.setSpacing(16)
+        self.detail=PageScroll();layout=self.detail.page_layout
         row=QHBoxLayout();row.addWidget(self.button('‹ 返回发现工具',lambda:self.navigate('store')));row.addStretch();layout.addLayout(row)
         header=QHBoxLayout();header.setSpacing(24)
         self.detail_icon=QLabel();self.detail_icon.setFixedSize(160,160);self.detail_icon.setAlignment(Qt.AlignCenter)
@@ -160,22 +209,25 @@ class Window(QMainWindow):
         self.detail_title=label('','title');info.addWidget(self.detail_title)
         self.detail_description=label('','subtitle');info.addWidget(self.detail_description);info.addStretch()
         header.addLayout(info,1);layout.addLayout(header)
-        self.detail_tabs=QTabWidget();self.detail_tabs.setTabBar(GoldTabBar());layout.addWidget(self.detail_tabs,1)
         self.overview=QWidget();overview=QVBoxLayout(self.overview);overview.setContentsMargins(24,24,24,24);overview.setSpacing(18)
         self.detail_badge=label('','badge');overview.addWidget(self.detail_badge)
         self.detail_help=label('');overview.addWidget(self.detail_help)
         self.install_button=self.button('安装工具',self.install_latest,'primary');overview.addWidget(self.install_button)
         self.readme=MarkdownView();self.readme.setOpenExternalLinks(False);self.readme.setOpenLinks(False);overview.addWidget(self.readme,1)
-        self.detail_tabs.addTab(self.overview,'概览')
+        layout.addWidget(self.overview)
         releases=QWidget();rl=QVBoxLayout(releases);rl.setContentsMargins(20,20,20,20)
         rl.addWidget(label('全部释出版本','title'));rl.addWidget(label('安装新版本不会删除旧版本。选择已安装版本即可切换或回退。','subtitle'))
-        self.release_list=QTreeWidget();self.release_list.setHeaderLabels(['版本','兼容范围','本地状态','发布日期']);self.release_list.setRootIsDecorated(False);self.release_list.setColumnWidth(0,170);self.release_list.setColumnWidth(1,200);self.release_list.setColumnWidth(2,120)
+        self.release_list=ReleaseList();self.release_list.setHeaderLabels(['版本','兼容范围','本地状态','发布日期']);self.release_list.setRootIsDecorated(False);self.release_list.setColumnWidth(0,170);self.release_list.setColumnWidth(1,200);self.release_list.setColumnWidth(2,120)
+        self.release_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.release_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.release_list.header().setSectionResizeMode(QHeaderView.Stretch)
+        self.release_list.setWordWrap(True)
         self.release_list.currentItemChanged.connect(self.release_selected);rl.addWidget(self.release_list,1)
         self.release_notes=label('选择版本查看更新说明。');rl.addWidget(self.release_notes)
         row=QHBoxLayout();self.download_button=self.button('安装选中版本',self.install_selected,'primary');row.addWidget(self.download_button)
         self.activate_button=self.button('切换到此版本',self.activate_selected);row.addWidget(self.activate_button)
         self.uninstall_button=self.button('卸载此版本',self.uninstall_selected,'danger');row.addWidget(self.uninstall_button);rl.addLayout(row)
-        self.detail_tabs.addTab(releases,'版本与卸载');self.pages.addWidget(self.detail)
+        layout.addWidget(releases);self.pages.addWidget(self.detail)
 
     def build_tool_panel(self):
         self.tool_panel=QWidget();layout=QVBoxLayout(self.tool_panel);layout.setContentsMargins(0,0,0,0)
@@ -204,8 +256,11 @@ class Window(QMainWindow):
         layout.addWidget(label('设置与更新','title'));layout.addWidget(label('设置创作环境，其余交给工具架。','subtitle'))
         layout.addWidget(label('运行环境由各个工具自行声明，请在对应工具面板中配置。','subtitle'))
         frame=QFrame();frame.setObjectName('card');form=QVBoxLayout(frame);form.setContentsMargins(24,20,24,20)
-        form.addWidget(label('工具架更新','title'));form.addWidget(label('当前版本 '+VERSION+' · 更新保留已装工具、夹子和软件设置。','subtitle'))
+        form.addWidget(label('工具架更新','title'));form.addWidget(label('当前版本 '+self.display_version+' · 更新保留已装工具、夹子和软件设置。','subtitle'))
         self.update_button=self.button('检查并下载更新',self.update_client);form.addWidget(self.update_button)
+        if self.development:
+            self.update_button.setEnabled(False)
+            form.addWidget(label('开发版直接运行 project 源码，不接收客户端更新；正式商店仍只列 GitHub Release。','subtitle'))
         result=self.store.root/'update-result.txt'
         if result.exists():form.addWidget(label(result.read_text('utf-8'),'subtitle'))
         layout.addWidget(frame)
@@ -218,22 +273,25 @@ class Window(QMainWindow):
     def installed(self):
         tools, errors=discover_tools(self.tools_root)
         known={e['id'] for e in self.catalog.data['packages']}
-        return [t for t in tools if t['id'] in known]
+        return [t for t in tools if t['id'] in known and (self.development or t.get('distribution')!='github-branch')]
 
     def navigate(self, mode, folder=None):
         if hasattr(self,'workspace'):self.workspace.shutdown()
+        selected_mode=mode
         self.view_mode=mode;self.folder_id=folder
-        for key,button in self.nav.items():button.setChecked(key==mode)
+        for key,button in self.nav.items():button.setChecked(key==selected_mode)
         if mode=='settings':self.pages.setCurrentWidget(self.settings);return
         self.browse_title.setText(self.library.data['folders'].get(folder,'我的工具') if mode=='library' else '发现工具')
         self.hero.setVisible(mode=='store');self.pages.setCurrentWidget(self.browse);self.render_cards()
         self.install_filter.setVisible(mode=='store');self.sync_button.setVisible(mode=='store')
+        self.sync_button.setText('扫描作者仓库')
 
     def render_cards(self):
         for row in range(self.cards.rowCount()):self.cards.setRowStretch(row,0)
         while self.cards.count():
             item=self.cards.takeAt(0)
-            if item.widget():item.widget().deleteLater()
+            if item.widget():
+                item.widget().hide();item.widget().deleteLater()
         installed=self.installed();installed_ids={t['id'] for t in installed}
         groups={}
         for entry in sorted(self.catalog.data['packages'],key=version_order,reverse=True):groups.setdefault(entry['id'],entry)
@@ -241,7 +299,8 @@ class Window(QMainWindow):
         for entry in groups.values():
             identity=entry['id']
             local=[t for t in installed if t['id']==identity]
-            update=bool(local) and version_order(entry)>max(version_order(t) for t in local)
+            update_entry=next((e for e in self.catalog.data['packages'] if e['id']==identity and e.get('distribution')=='github-branch' and any(t['version']=='0.0.0' and t.get('commit')!=e.get('commit') for t in local)),entry)
+            update=bool(local) and (update_entry is not entry or version_order(entry)>max(version_order(t) for t in local) or (entry.get('distribution')=='github-branch' and any(t['version']=='0.0.0' and t.get('commit')!=entry.get('commit') for t in local)))
             if self.view_mode=='library' and identity not in installed_ids:continue
             if self.view_mode=='library' and self.folder_id and self.library.data['assignments'].get(identity)!=self.folder_id:continue
             if self.search.text().strip().lower() not in (entry['name']+' '+entry['description']).lower():continue
@@ -268,17 +327,32 @@ class Window(QMainWindow):
             else:
                 row.addWidget(self.button('详情',lambda i=identity:self.show_tool(i)))
                 if not local or update:
-                    action=self.button('更新' if update else '下载',lambda e=entry:self.install_entry(e),'primary');action.setEnabled(not self.job);row.addWidget(action)
+                    action=self.button('更新' if update else '下载',lambda e=update_entry:self.install_entry(e),'primary');action.setEnabled(not self.job);row.addWidget(action)
                 if local:
                     action=self.button('卸载',lambda i=identity:self.uninstall_tool(i),'danger');action.setEnabled(not self.job);row.addWidget(action)
             layout.addLayout(row)
             self.cards.addWidget(card,count//2,count%2);count+=1
         if count==0:
             empty=label('没有符合筛选条件的工具。试试其他分类或关键词。' if self.view_mode=='store' else '这里还没有已下载工具。请在“发现工具”下载，或调整分类和关键词。','subtitle');self.cards.addWidget(empty,0,0,1,2)
-        self.cards.setRowStretch((count+1)//2,1)
-        self.cards.setColumnStretch(0,1);self.cards.setColumnStretch(1,1)
+        self.reflow_cards()
+
         self.hero_count.setText(f'{len(groups)} 款工具  /  已安装 {len(installed_ids)} 款  /  版本自由切换')
         self.summary.setText(f'{count} 款工具'+(' · 作者精选' if self.view_mode=='store' else ' · 你的本地工具库'))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'cards'):
+            QTimer.singleShot(0,self.reflow_cards)
+
+    def reflow_cards(self):
+        columns = 2 if self.browse.viewport().width() >= 900 else 1
+        widgets = [self.cards.itemAt(i).widget() for i in range(self.cards.count())]
+        for widget in widgets:
+            self.cards.removeWidget(widget)
+        for i, widget in enumerate(widgets):
+            self.cards.addWidget(widget, i // columns, i % columns)
+        self.cards.setColumnStretch(0, 1)
+        self.cards.setColumnStretch(1, 1 if columns == 2 else 0)
 
     def refresh_folders(self):
         self.folders.blockSignals(True);self.folders.clear()
@@ -321,10 +395,10 @@ class Window(QMainWindow):
         self.detail_icon.setPixmap(pixmap.scaled(160,160,Qt.KeepAspectRatio,Qt.SmoothTransformation))
         self.detail_title.setText(entry['name']);self.detail_description.setText(entry['description'])
         installed=[t for t in self.installed() if t['id']==identity]
-        self.detail_badge.setText(entry.get('category','实用工具')+'  /  '+str(len(entries))+' 个释出版本')
+        self.detail_badge.setText(entry.get('category','实用工具')+'  /  '+str(len(entries))+' 个可安装版本')
         self.readme.setMarkdown(entry.get('readmeText','作者未提供介绍。'))
         self.detail_help.setText('最新版 '+entry['version']+' · '+compatibility_label(entry)+'\n'+entry.get('notes',''))
-        newest_local=any(package_key(t)==package_key(entry) for t in installed)
+        newest_local=any(package_key(t)==package_key(entry) and (entry.get('distribution')!='github-branch' or t.get('commit')==entry.get('commit')) for t in installed)
         self.install_button.setText('已安装最新版本' if newest_local else '安装最新版本' if not installed else '更新到最新版本')
         self.install_button.setEnabled(not newest_local and not self.job)
         active=self.active_key(identity,installed)
@@ -334,10 +408,14 @@ class Window(QMainWindow):
             if package_key(tool) not in available:available[package_key(tool)]=dict(tool,notes='本地保留版本；当前商店不再提供下载。',local_only=True)
         for entry in sorted(available.values(),key=version_order,reverse=True):
             key=package_key(entry);local=next((t for t in installed if package_key(t)==key),None)
-            item=QTreeWidgetItem([entry['version'], compatibility_label(entry), '使用中' if active==key else '已安装' if local else '未安装',entry.get('publishedAt') or '未提供'])
+            item=QTreeWidgetItem([('0.0.0 · '+entry.get('branch','最新分支')+' · '+entry.get('commit','')[:8] if entry.get('distribution')=='github-branch' else entry['version']), compatibility_label(entry), '使用中' if active==key else '已安装' if local else '未安装',entry.get('publishedAt') or '未提供'])
             item.setData(0,256,{'entry':entry,'local':local});self.release_list.addTopLevelItem(item)
         if self.release_list.topLevelItemCount():self.release_list.setCurrentItem(self.release_list.topLevelItem(0))
-        self.detail_tabs.setCurrentIndex(0);self.pages.setCurrentWidget(self.detail)
+        self.pages.setCurrentWidget(self.detail)
+        self.release_list.doItemsLayout()
+        rows_height=sum(self.release_list.sizeHintForRow(i) for i in range(self.release_list.topLevelItemCount()))
+        self.release_list.setFixedHeight(rows_height+self.release_list.header().height()+2*self.release_list.frameWidth()+4)
+        self.detail.verticalScrollBar().setValue(0)
 
     def active_key(self, identity, installed):
         return self.workspace.selected(identity,installed)
@@ -351,7 +429,9 @@ class Window(QMainWindow):
         if not self.release_list.currentItem():return
         selection=self.selected_release();entry,local=selection['entry'],selection['local']
         self.release_notes.setText(compatibility_label(entry)+'\n'+entry.get('notes','作者未提供更新说明。'))
-        self.download_button.setEnabled(not local and not entry.get('local_only') and not self.job)
+        branch_update=bool(local and entry.get('distribution')=='github-branch' and local.get('commit')!=entry.get('commit'))
+        self.download_button.setText('更新分支快照' if branch_update else '安装选中版本')
+        self.download_button.setEnabled((not local or branch_update) and not entry.get('local_only') and not self.job)
         active=self.active_key(entry['id'],[t for t in self.installed() if t['id']==entry['id']])
         self.activate_button.setText('正在使用此版本' if active==package_key(entry) else '切换到此版本')
         self.activate_button.setEnabled(bool(local) and active!=package_key(entry) and not self.job)
@@ -369,13 +449,17 @@ class Window(QMainWindow):
         def done(_):
             self.workspace.choose_version(identity,version)
             self.status.setText('下载完成，已选择 '+entry['version']+'。请从“我的工具”打开。')
-        self.busy(lambda:install_repository(entry,self.tools_root),done,'正在下载并校验工具…')
+        if entry.get('distribution')=='github-branch':
+            if not self.development:raise ValueError('正式版只接受 Release')
+            installer=development.install_branch
+        else:installer=install_repository
+        self.busy(lambda:installer(entry,self.tools_root),done,'正在下载并校验工具…')
 
     def activate_selected(self):
         if self.job:return
         selection=self.selected_release();tool=selection['local']
         if not tool:raise ValueError('请先安装此版本')
-        self.workspace.choose_version(tool['id'],package_key(tool));self.show_tool(tool['id']);self.detail_tabs.setCurrentIndex(1)
+        self.workspace.choose_version(tool['id'],package_key(tool));self.show_tool(tool['id']);QTimer.singleShot(0,lambda:self.detail.ensureWidgetVisible(self.activate_button))
         self.status.setText('已切换到 '+tool['version']+'，旧版本保留。')
 
     def uninstall_selected(self):
@@ -407,9 +491,9 @@ class Window(QMainWindow):
         self.job.start()
 
     def idle(self):
-        self.job.deleteLater();self.job=None;self.progress.hide();self.sync_button.setEnabled(True);self.update_button.setEnabled(True)
+        self.job.deleteLater();self.job=None;self.progress.hide();self.sync_button.setEnabled(True);self.update_button.setEnabled(not self.development)
         if self.pages.currentWidget()==self.detail and self.current_id and any(e['id']==self.current_id for e in self.catalog.data['packages']):
-            tab=self.detail_tabs.currentIndex();self.show_tool(self.current_id);self.detail_tabs.setCurrentIndex(tab)
+            position=self.detail.verticalScrollBar().value();self.show_tool(self.current_id);QTimer.singleShot(0,lambda:self.detail.verticalScrollBar().setValue(position))
         elif self.pages.currentWidget()==self.tool_panel:
             self.open_tool_panel(self.current_id)
         else:self.render_cards()
@@ -427,9 +511,39 @@ class Window(QMainWindow):
             warning=' · '+str(len(data.get('warnings',[])))+' 个仓库需检查' if data.get('warnings') else ''
             self.status.setText('已扫描 '+str(data.get('scannedRepositories',0))+' 个仓库 · 发现 '+str(len({e['id'] for e in data['packages']}))+' 个 LX 工具'+warning)
             self.status.setToolTip('\n'.join(data.get('warnings',[])))
-        self.busy(lambda:self.catalog.sync(),done,'正在扫描 gd-dd 的仓库并验证 LX 标识…')
+        def scan():
+            data=AuthorCatalog(self.store.root).sync()
+            if self.development:
+                branches,warnings=development.scan_branches()
+                data['packages'].extend(branches);data.setdefault('warnings',[]).extend(warnings)
+            return data
+        self.busy(scan,done,'正在扫描 gd-dd 的仓库并验证 LX 标识…')
+
+    def check_development(self):
+        current=development.fingerprint(self.project_root)
+        if current==self.dev_stamp:return
+        if current!=self.dev_pending:
+            self.dev_pending=current;return
+        if self.job or QApplication.activeModalWidget():return
+        self.reload_development()
+
+    def reload_development(self):
+        if not self.development:return
+        if self.job:
+            self.status.setText('等待当前任务完成后重载。');return
+        try:
+            paths=list((self.project_root/'src').glob('*.py'))
+            for path in paths:compile(path.read_bytes(),str(path),'exec')
+        except (SyntaxError,OSError) as error:
+            self.status.setText('暂不重载，请先修复源码：'+str(error));return
+        state={'view':self.view_mode}
+        (self.store.root/'preview-state.json').write_text(json.dumps(state),encoding='utf-8')
+        self.workspace.shutdown()
+        QApplication.instance().exit(75)
 
     def update_client(self):
+        if self.development:
+            self.status.setText('本地开发版通过源码更新，不接收 Release 覆盖。');return
         def done(result):
             if result is None:self.status.setText('未发现新的稳定发行版，当前 '+VERSION+'。');return
             tag,stage=result
@@ -456,10 +570,20 @@ def main():
     if len(sys.argv)==4 and sys.argv[1]=='--apply-update':
         return apply_update(Path(sys.executable).parent,Path(sys.argv[2]),int(sys.argv[3]))
     app=QApplication(sys.argv);app.setStyle('Fusion');app.setStyleSheet(STYLE);app.setWindowIcon(QIcon(str(icon_path())))
-    root=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'LXTool';root.mkdir(parents=True,exist_ok=True)
+    project=Path(__file__).resolve().parents[1]
+    root=project/'runtime/development/profile' if development.enabled() else Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'LXTool'
+    root.mkdir(parents=True,exist_ok=True)
     lock=QLockFile(str(root/'desktop.lock'))
     if not lock.tryLock(100):QMessageBox.information(None,'LXTool','工具架已经运行，请使用现有窗口。');return 0
-    window=Window(ToolStore(root));window.show();return app.exec()
+    window=Window(ToolStore(root),project/'tools' if development.enabled() else None)
+    state_file=root/'preview-state.json'
+    if development.enabled() and state_file.exists():
+        try:
+            state=json.loads(state_file.read_text('utf-8'))
+            mode=state.get('view','store')
+            window.navigate(mode if mode in ('store','library','settings') else 'store')
+        except (ValueError,OSError):pass
+    window.show();return app.exec()
 
 
 if __name__=='__main__':sys.exit(main())

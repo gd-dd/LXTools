@@ -155,6 +155,6 @@ def discover_packages(root):
                 if not file.is_relative_to(package):raise ValueError('文件越界')
                 checked_bytes(file.read_bytes(),digest)
             panel=validate_panel(json.loads((package/m['panel']).read_text('utf-8')),m)
-            tools.append(dict(m,id=saved['id'],repository=saved['repository'],root=package,panelData=panel))
+            tools.append(dict(m,id=saved['id'],repository=saved['repository'],root=package,panelData=panel,commit=saved.get('commit'),distribution=saved.get('distribution','github-release'),branch=saved.get('branch')))
         except Exception as error:errors.append(str(receipt)+': '+str(error))
     return tools,errors

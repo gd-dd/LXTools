@@ -10,7 +10,7 @@ import uuid
 from packaging.version import Version, InvalidVersion
 from core import ToolStore
 
-VERSION = '0.0.1'
+VERSION = '0.0.2'
 
 
 def prepare_update(root, token=None):

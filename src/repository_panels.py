@@ -146,7 +146,8 @@ class RepositoryWorkspace(QWidget):
     def execute(self,key):
         tool=self.current
         # Revalidate on click: discovery does not execute any code.
-        verified=next((t for t in discover_packages(self.tools_root)[0] if t['id']==tool['id'] and t['version']==tool['version']),None)
+        candidates=discover_packages(self.tools_root)[0]
+        verified=next((t for t in candidates if t['id']==tool['id'] and t['version']==tool['version']),None)
         if not verified:raise ValueError('工具文件已改变，请重新安装或核对')
         action=tool['actions'][key];settings=self.config.get('applications',{}).get(tool['id'],{})
         if action['type']=='process':

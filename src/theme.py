@@ -32,6 +32,9 @@ QTabBar::tab { padding:12px 22px; background:transparent; color:#777777; }
 QTabBar::tab:selected { color:#202020; background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(134,184,61,65),stop:1 rgba(134,184,61,18)); }
 QProgressBar { max-height:6px; border:0; background:rgba(119,119,119,25); }
 QProgressBar::chunk { background:#86b83d; }
-QScrollBar:vertical { width:10px; background:transparent; }
-QScrollBar::handle:vertical { background:#86b83d; border-radius:4px; min-height:30px; }
+QScrollBar:vertical { width:16px; background:rgba(134,184,61,16); margin:0; }
+QScrollBar::handle:vertical { background:#86b83d; border-radius:7px; min-height:48px; margin:2px; }
+QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
+QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical { background:transparent; }
+QScrollBar::handle:vertical:hover { background:#507522; }
 '''

@@ -16,7 +16,10 @@ if repo=='gd-dd/LXTools':
     version=re.search(r"^VERSION = '([^']+)'",Path('src/updater.py').read_text(),re.M)[1]
     names=[f'LXTools-Setup-{version}-windows-x64.exe','LXTool-windows-x64.zip','SHA256SUMS.txt']
     title='LXTools v'+version
-    notes='首次正式发行。工具架与工具均通过 GitHub Releases 管理版本。\n\n普通用户下载 Setup EXE 安装；ZIP 用于免安装及自更新。旧 0.5.0 为首次发布编号更正，已安装旧版需手动重装 0.0.1，之后按递增版本更新。'
+    notes=Path('RELEASE-NOTES.md').read_text('utf-8')
+    ref=os.environ.get('GITHUB_REF','')
+    if ref.startswith('refs/heads/release/') and ref!='refs/heads/release/v'+version:
+        raise RuntimeError('Release branch does not match source version')
 else:
     manifest=json.loads(Path('.lxtool/manifest.json').read_text('utf-8-sig'));version=manifest['version']
     names=['LXTool-package.zip','SHA256SUMS.txt'];title=manifest['name']+' v'+version

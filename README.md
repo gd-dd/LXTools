@@ -50,3 +50,7 @@
 完整自定义面板：阅读 [native API 1](docs/custom-panel-api.md)，可运行模板在 `examples/native-panel/`。模板不会自动加入用户商店。
 
 Windows 安装包：运行 `./build-installer.ps1`（需要 Inno Setup 6.7 或更高的 6.x 版本），输出安装 EXE、更新 ZIP 和 SHA256SUMS.txt。首次发布请逐步阅读 [Release 教程](docs/first-release.md)。
+
+## 本地开发与正式客户端
+
+日常修改请双击 `start-dev.bat`（`start.bat` 同样进入开发版）。显示 0.0.0，工具架源码保存后自动重载。两版共用发现工具和我的工具；开发版额外提供 GitHub 默认分支 0.0.0 工具快照，工具源码须先推送，不再提供本地工具开发页。正式用户入口为 `E:\Ruanjian\LXTools\LXTool.exe`，只使用 GitHub Releases。完整操作见 [开发与发布工作流](docs/开发与发布工作流.md)。

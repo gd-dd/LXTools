@@ -31,7 +31,7 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse(window.detail_icon.pixmap().isNull())
             self.assertEqual(window.detail_icon.width(),160)
             self.assertEqual(window.pages.currentWidget(),window.detail)
-            self.assertEqual([window.detail_tabs.tabText(i) for i in range(window.detail_tabs.count())],['概览','版本与卸载'])
+            self.assertFalse(hasattr(window,'detail_tabs'))
             self.assertFalse(hasattr(window,'panel_button'))
             window.close()
 
@@ -113,4 +113,38 @@ class DesktopTests(unittest.TestCase):
             with patch('desktop.QMessageBox.question',return_value=QMessageBox.Yes):window.uninstall_tool('repo-42')
             self.assertEqual(window.installed(),[])
             window.navigate('library');self.assertTrue(window.summary.text().startswith('0 款'))
+            window.close()
+
+    def test_whole_store_scroll_reaches_long_content_at_small_window(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtWidgets import QScrollArea
+        from theme import STYLE
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root)
+            _,_,entry=fixtures.fixture(root/'fixture')
+            window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
+            window.setStyleSheet(STYLE)
+            window.catalog.data['packages']=[dict(entry,id=f'repo-{i}',description='Long description '*30) for i in range(30)]
+            window.resize(1040,720);window.show();window.render_cards()
+            for _ in range(10):self.app.processEvents()
+            self.assertGreater(window.browse.verticalScrollBar().maximum(),1000)
+            self.assertEqual(window.browse.findChildren(QScrollArea),[])
+            self.assertLessEqual(window.browse.widget().width(),window.browse.viewport().width())
+            last=window.cards.itemAt(window.cards.count()-1).widget()
+            window.browse.verticalScrollBar().setValue(window.browse.verticalScrollBar().maximum())
+            self.app.processEvents()
+            bottom=last.mapTo(window.browse.viewport(),QPoint(0,last.height())).y()
+            self.assertLessEqual(bottom,window.browse.viewport().height())
+            entries=[dict(entry,version=f'1.0.{i}',readmeText=('## Long documentation\n\nParagraph of documentation.\n\n'*150)) for i in range(60)]
+            window.catalog.data['packages']=entries;window.show_tool(entry['id'])
+            for _ in range(10):self.app.processEvents()
+            self.assertGreater(window.detail.verticalScrollBar().maximum(),5000)
+            self.assertEqual(window.readme.verticalScrollBar().maximum(),0)
+            self.assertEqual(window.release_list.verticalScrollBar().maximum(),0)
+            self.assertEqual(window.detail.findChildren(QScrollArea),[])
+            window.detail.verticalScrollBar().setValue(window.detail.verticalScrollBar().maximum())
+            self.app.processEvents()
+            bottom=window.uninstall_button.mapTo(window.detail.viewport(),QPoint(0,window.uninstall_button.height())).y()
+            self.assertGreater(bottom,0)
+            self.assertLessEqual(bottom,window.detail.viewport().height())
             window.close()

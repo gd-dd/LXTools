@@ -1,7 +1,7 @@
 name: Windows build
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/v*']
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -41,7 +41,7 @@ jobs:
 
   publish:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    if: startsWith(github.ref, 'refs/heads/release/v') || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: windows-latest
     permissions:
       contents: write

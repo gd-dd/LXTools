@@ -253,3 +253,42 @@ GitHub Actions 40002103768 已完成，结论 success；人工验收与 Max 2026
 - [ ] 用户人工验收：首次重装工具架 0.0.1，商店安装工具 0.0.1；Max 宿主业务仍需用户实测。
 
 两仓库正式 Release 均为 v0.0.1；一次性编号更正流程已移除，后续发布只通过标签或手动触发工作流，不覆盖已公开版本。
+
+## 商店整页滚动
+- [x] 发现工具和详情采用单一整页滚动；介绍和版本不再分标签或内部滚动。
+- [x] 滑条加宽，小窗口卡片自动单列。
+- [x] 43 项测试通过；30 款工具、60 个版本、长 Markdown 在 1040×720 窗口滚动到底，内层无滚动条。
+- [x] PyInstaller 干净目录构建、Inno Setup 安装包编译和隔离配置 EXE 启动通过。
+- 构建日志：runtime/audit/store-scroll-rebuild.log、store-scroll-installer.log。旧客户端占用 dist 部分 DLL，安装包取自 build/packaged，不依赖运行中的副本。
+- 本次仅本地验收包，未提交或发布，未覆盖 GitHub Release。
+- [ ] 用户人工验收。
+
+## 开发与正式使用分离
+- [x] project 源码开发入口 0.0.0、独立配置、自动重载。
+- [x] tools 内本地仓库预览与安全远端同步，正式商店仍仅 Release。扫描 gd-dd 的公开仓库，识别 Max 和 LXGit；现有源码用目录连接复用，脏工作区安全跳过同步。
+- [x] E:/Ruanjian/LXTools 安装公开 v0.0.1，程序逐文件匹配公开 ZIP，原工具和原图复制校验通过，开始菜单指向新客户端。
+- [ ] 旧副本清理被自动审批阻止；待手动处理 docs/待手动清理.md 列出的目录。未删除源码和用户数据。
+- [x] 47 项测试通过；真实 Max/LXGit 原生面板加载；正式客户端与新打包 EXE 启动通过；PyInstaller/Inno Setup 编译通过。
+- [x] docs/开发与发布工作流.md、README 和 AGENTS 固化日常流程。构建日志 runtime/audit/development-workflow-build-final.log。
+- [ ] 用户验收。
+
+## 开发商店默认分支快照
+- [x] 发现工具提供 Release 和 0.0.0 默认分支；同一工具、统一安装与面板入口。
+- [x] 分支按提交固定下载，更新覆盖仅 0.0.0；正式版禁止分支安装。
+- [x] 50 项测试通过；真实下载 Max 和 LXGit 默认分支快照并加载原生面板。LXGit 编译文件依据分支声明摘要从对应 Release 补齐；错误摘要拒绝。
+- [x] PyInstaller、Inno Setup 编译及 EXE 启动通过，日志 runtime/audit/branch-store-build-final.log。未发布或修改正式安装客户端。
+- [ ] 用户验收。
+
+## 统一入口与 Skill 整理（取代此前本地工具预览约定）
+- [x] 移除本地工具开发页面、源码工具预览和自动 Git 拉取；两版导航一致，开发版仅增加分支 0.0.0。
+- [x] 保留作者源码；工具架热重载不再监听本地工具。
+- [x] 新建 lx-tools-workflow，更新 lx-tool-creator 的开发商店约定；同步 README、AGENTS 和流程文档。
+- [x] 两个 Skill 校验通过；48 项测试、PyInstaller/Inno Setup 构建通过；实际窗口检查三项统一导航，从我的工具加载已下载分支原生面板通过。日志 runtime/audit/unified-store-build.log。
+- [ ] 用户人工验收。
+
+## 2026-10-30 发布 v0.0.2
+- [x] 用户确认发布 LXTools，蒙皮工具不在本次变更范围。
+- [x] 核对远端最新 v0.0.1，准备 0.0.2 版本和发行说明。
+- [ ] 本地构建和启动验证。
+- [ ] 同步源码、云端测试构建并发布，核验公开附件。
+- [ ] 用户安装验收。
