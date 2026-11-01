@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from PySide6.QtGui import QImage
-from github_api import github_json
+from github_api import github_json, http_error_message
 from core import NoRedirect
 from library import write_json,resource_path
 from lx_protocol import MARKER,validate_manifest,validate_panel,safe_path,checked_bytes
@@ -75,19 +75,31 @@ def release_asset(release):
     return {k:a[k] for k in ('id','name','size','digest')}
 
 
-def download_release_asset(repository,asset,token=None):
-    headers={'User-Agent':'LXTool','Accept':'application/octet-stream'}
+def download_release_asset(repository,asset,token=None,tag=None):
+    # Public versioned downloads avoid the REST asset endpoint and its quota.
+    # Metadata is still freshly checked by install_repository before this call.
+    public = not token and tag is not None
+    if public:
+        if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',tag):
+            raise ValueError('Release 标签无效')
+        url=f'https://github.com/{repository}/releases/download/{tag}/{PACKAGE_ASSET}'
+    else:
+        url=f"https://api.github.com/repos/{repository}/releases/assets/{int(asset['id'])}"
+    headers={'User-Agent':'LXTool','Accept':'application/octet-stream','Cache-Control':'no-cache'}
     if token:headers['Authorization']='Bearer '+token
-    request=urllib.request.Request(f"https://api.github.com/repos/{repository}/releases/assets/{int(asset['id'])}",headers=headers)
+    request=urllib.request.Request(url,headers=headers)
     try:
-        response=urllib.request.build_opener(NoRedirect).open(request,timeout=60)
+        try:
+            response=urllib.request.build_opener(NoRedirect).open(request,timeout=60)
+        except urllib.error.HTTPError as error:
+            if error.code not in (301,302,303,307,308):raise
+            url=error.headers['Location']
+            if urllib.parse.urlparse(url).scheme!='https':raise ValueError('附件下载必须使用 HTTPS')
+            # Never forward credentials to the signed asset URL.
+            response=urllib.request.urlopen(url,timeout=60)
+        with response:data=response.read(MAX_PACKAGE+1)
     except urllib.error.HTTPError as error:
-        if error.code not in (301,302,303,307,308):raise
-        url=error.headers['Location']
-        if urllib.parse.urlparse(url).scheme!='https':raise ValueError('附件下载必须使用 HTTPS')
-        # Never forward the private-repository credential to the signed asset URL.
-        response=urllib.request.urlopen(url,timeout=60)
-    with response:data=response.read(MAX_PACKAGE+1)
+        raise RuntimeError(http_error_message(error,'下载工具附件')) from error
     if len(data)!=asset['size'] or len(data)>MAX_PACKAGE:raise ValueError('附件大小不匹配')
     return checked_bytes(data,asset['digest'].removeprefix('sha256:'))
 
@@ -189,7 +201,7 @@ def install_repository(entry,destination,token=None):
     if release.get('draft') or release.get('prerelease') or release['tag_name']!=entry['releaseTag']:raise ValueError('Release 状态已变化，请重新扫描')
     asset=release_asset(release)
     if asset!=entry['releaseAsset']:raise ValueError('Release 附件已变化，请重新扫描')
-    payload=download_release_asset(entry['repository'],asset,token)
+    payload=download_release_asset(entry['repository'],asset,token,tag=entry['releaseTag'])
     files=unpack_release(payload)
     read=lambda path:files[path]
     m=validate_manifest(json.loads(read(MARKER)))

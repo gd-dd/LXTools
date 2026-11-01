@@ -65,3 +65,46 @@ class GitHubReleaseTests(unittest.TestCase):
             root=Path(tmp);_,_,entry=f.fixture(root/'fixture')
             (root/'repository-catalog-v2.json').write_text(json.dumps({'schemaVersion':2,'packages':[entry]}),'utf-8')
             self.assertEqual(RepositoryCatalog(root).data['packages'],[])
+
+    def test_public_download_uses_version_url_and_checks_digest(self):
+        data=b'public zip';asset={'id':123,'size':len(data),'digest':'sha256:'+hashlib.sha256(data).hexdigest()}
+        from unittest.mock import Mock
+        opener=Mock();opener.open.side_effect=lambda *a,**k:io.BytesIO(data)
+        with patch('repository_source.urllib.request.build_opener',return_value=opener):
+            self.assertEqual(download_release_asset('gd-dd/example',asset,tag='v1.2.3'),data)
+            request=opener.open.call_args.args[0]
+            self.assertEqual(request.full_url,'https://github.com/gd-dd/example/releases/download/v1.2.3/LXTool-package.zip')
+            self.assertIsNone(request.get_header('Authorization'))
+            with self.assertRaises(ValueError):
+                download_release_asset('gd-dd/example',dict(asset,digest='sha256:'+'0'*64),tag='v1.2.3')
+
+    def test_private_redirect_does_not_forward_token(self):
+        from urllib.error import HTTPError
+        from unittest.mock import Mock
+        data=b'private zip';asset={'id':123,'size':len(data),'digest':'sha256:'+hashlib.sha256(data).hexdigest()}
+        opener=Mock();opener.open.side_effect=HTTPError('https://api.github.com',302,'redirect',{'Location':'https://release-assets.githubusercontent.com/test'},None)
+        with patch('repository_source.urllib.request.build_opener',return_value=opener),patch('repository_source.urllib.request.urlopen',return_value=io.BytesIO(data)) as redirected:
+            self.assertEqual(download_release_asset('gd-dd/example',asset,'test-token',tag='v1.2.3'),data)
+            self.assertIn('/releases/assets/123',opener.open.call_args.args[0].full_url)
+            redirected.assert_called_once_with('https://release-assets.githubusercontent.com/test',timeout=60)
+
+    def test_rate_limit_and_unknown_403_are_distinguished(self):
+        from urllib.error import HTTPError
+        from github_api import http_error_message
+        limited=HTTPError('https://api.github.com/repos/gd-dd/example',403,'forbidden',{'X-RateLimit-Remaining':'0','X-RateLimit-Reset':'2000000000'},None)
+        self.assertIn('额度已用尽',http_error_message(limited))
+        blocked=HTTPError('https://release-assets.githubusercontent.com/x?secret=hidden',403,'forbidden',{},None)
+        message=http_error_message(blocked,'下载工具附件')
+        self.assertIn('尚不能确定',message)
+        self.assertIn('下载工具附件',message)
+        self.assertNotIn('secret',message)
+
+    def test_metadata_403_does_not_bypass_release_validation(self):
+        from urllib.error import HTTPError
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);package,m,entry=f.fixture(root/'fixture');f.release_fixture(package,m,entry)
+            error=HTTPError('https://api.github.com',403,'forbidden',{},None)
+            with patch('repository_source.github_json',side_effect=error),patch('repository_source.download_release_asset') as download:
+                with self.assertRaises(HTTPError):install_repository(entry,root/'installed')
+                download.assert_not_called()
+                self.assertFalse((root/'installed').exists())

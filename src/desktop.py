@@ -99,8 +99,8 @@ class Job(QThread):
             from urllib.error import HTTPError
             message = str(error)
             if isinstance(error, HTTPError):
-                message = {401:'账户授权已失效', 403:'下载服务限流或权限不足，请稍后再试',
-                           404:'目录或工具版本不存在，请刷新目录', 429:'下载服务繁忙，请稍后再试'}.get(error.code, '网络请求失败')
+                from github_api import http_error_message
+                message = http_error_message(error, '查询工具版本')
             self.failed.emit(message)
 
 
