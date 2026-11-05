@@ -24,6 +24,7 @@ from gold_effect import GoldButton
 from theme import STYLE
 import development
 import github_auth
+import storage_cleanup
 import time
 import webbrowser
 
@@ -258,7 +259,7 @@ class Window(QMainWindow):
         self.workspace.display(tool);self.pages.setCurrentWidget(self.tool_panel)
 
     def build_settings(self):
-        self.settings=QWidget();layout=QVBoxLayout(self.settings);layout.setContentsMargins(0,0,0,0);layout.setSpacing(18)
+        self.settings=PageScroll();layout=self.settings.page_layout;layout.setContentsMargins(0,0,0,0);layout.setSpacing(18)
         layout.addWidget(label('设置与更新','title'));layout.addWidget(label('设置创作环境，其余交给工具架。','subtitle'))
         layout.addWidget(label('运行环境由各个工具自行声明，请在对应工具面板中配置。','subtitle'))
         frame=QFrame();frame.setObjectName('card');form=QVBoxLayout(frame);form.setContentsMargins(24,20,24,20)
@@ -273,20 +274,72 @@ class Window(QMainWindow):
         frame=QFrame();frame.setObjectName('card');form=QVBoxLayout(frame);form.setContentsMargins(24,20,24,20)
         form.addWidget(label('GitHub 账户','title'))
         self.account_label=label('已登录：'+self.account['login'] if self.account else '未登录 · 公开工具可直接下载','subtitle');form.addWidget(self.account_label)
-        form.addWidget(self.button('登录 GitHub',self.login_github))
-        form.addWidget(self.button('退出登录 / 取消授权等待',self.logout_github))
+        self.login_code=QLineEdit();self.login_code.setReadOnly(True);self.login_code.setAlignment(Qt.AlignCenter);self.login_code.setMinimumHeight(76);self.login_code.setStyleSheet('font-size:32px;font-weight:700;color:#426b20;background:#f5f9ee;border:2px solid #92b854;border-radius:12px;');self.login_code.setPlaceholderText('点击登录后，这里显示验证码');form.addWidget(self.login_code)
+        self.copy_code_button=self.button('复制验证码',lambda:QApplication.clipboard().setText(self.login_code.text()));form.addWidget(self.copy_code_button)
+        self.login_button=self.button('登录 GitHub',self.login_github);form.addWidget(self.login_button)
+        self.logout_button=self.button('退出登录',self.logout_github);form.addWidget(self.logout_button)
+        self.account_manage_button=self.button('管理 GitHub 授权',lambda:webbrowser.open('https://github.com/settings/connections/applications/'+github_auth.CLIENT_ID));form.addWidget(self.account_manage_button)
+        self.refresh_account_ui()
         form.addWidget(label('自动扫描 gd-dd 的仓库；只有带有效 .lxtool 标识的项目进入商店。一仓库一工具。','subtitle'))
         form.addWidget(self.button('打开本地工具目录',lambda:os.startfile(str(self.tools_root))))
-        layout.addWidget(frame);layout.addStretch();self.pages.addWidget(self.settings)
+        layout.addWidget(frame)
+        cleanup=QFrame();cleanup.setObjectName('card');box=QVBoxLayout(cleanup)
+        box.addWidget(label('存储清理','title'))
+        box.addWidget(label('清理前显示目录与空间；保留当前工具版本、账户和个人配置。','subtitle'))
+        for title,kind in [('清理客户端下载缓存','cache'),('删除未使用的工具旧版本','versions'),('删除上次更新备份','backup')]:
+            box.addWidget(self.button(title,lambda kind=kind:self.clean_storage(kind)))
+        layout.addWidget(cleanup);layout.addStretch();self.pages.addWidget(self.settings)
+
+    def clean_storage(self,kind):
+        if self.job or self.pending_restart:
+            self.status.setText('请等待当前下载或更新结束后再清理。');return
+        candidates=[]
+        if kind=='cache':
+            path=self.store.root/'client-updates'
+            if path.exists():candidates=[(path,self.store.root)]
+        elif kind=='backup':
+            root=Path(sys.executable).parent if getattr(sys,'frozen',False) else self.project_root
+            candidates=[(path,root.parent) for path in storage_cleanup.backups(root)]
+        else:
+            tools=self.installed()
+            for tool in tools:
+                group=[t for t in tools if t['id']==tool['id']]
+                if tool['version']!=self.active_key(tool['id'],group):candidates.append((tool['root'],self.tools_root))
+        verified=[(storage_cleanup.checked(path,boundary),boundary) for path,boundary in candidates]
+        if not verified:self.status.setText('没有可清理的项目。');return
+        total=sum(storage_cleanup.size(path) for path,_ in verified)
+        detail='预计释放 %.1f MB。删除后无法本地回退，需要重新下载。\n\n'%(total/1024/1024)+'\n'.join(str(path) for path,_ in verified)
+        if QMessageBox.question(self,'确认清理',detail)!=QMessageBox.Yes:return
+        self.workspace.shutdown()
+        failures=[]
+        for path,boundary in verified:
+            try:storage_cleanup.remove(path,boundary)
+            except OSError:failures.append(str(path))
+        self.render_cards()
+        self.status.setText('清理完成。'+('以下项目被占用，未能完整清理：'+'；'.join(failures) if failures else ''))
+
+    def refresh_account_ui(self):
+        logged=bool(self.account);waiting=self.login_session is not None
+        self.login_code.setVisible(not logged and waiting)
+        self.copy_code_button.setVisible(not logged and waiting)
+        self.copy_code_button.setEnabled(bool(self.login_code.text()))
+        self.login_button.setVisible(not logged and not waiting)
+        self.logout_button.setVisible(logged or waiting)
+        self.logout_button.setText('退出登录' if logged else '取消登录')
+        self.account_manage_button.setVisible(logged)
+        self.account_label.setStyleSheet('font-size:22px;font-weight:600;color:#426b20;' if logged else '')
+        if logged:self.account_label.setText('✓ 已登录  ·  '+self.account['login'])
 
     def login_github(self):
         if self.job or self.login_session:return
         attempt=object();self.login_session=attempt
+        self.login_code.clear();self.account_label.setText("正在获取验证码…");self.refresh_account_ui()
         def started(data):
             if self.login_session is not attempt:return
             self.login_session=dict(data,deadline=time.monotonic()+data['expires_in'])
             QApplication.clipboard().setText(data['user_code'])
-            self.account_label.setText('登录码：'+data['user_code']+'（已复制） · 请在浏览器授权')
+            self.login_code.setText(data['user_code']);self.refresh_account_ui()
+            self.account_label.setText('验证码已复制，请在浏览器输入并授权。')
             webbrowser.open('https://github.com/login/device')
             self.login_timer.start(max(5,data.get('interval',5))*1000)
         self.busy(github_auth.begin,started,'正在获取 GitHub 登录码…')
@@ -296,24 +349,26 @@ class Window(QMainWindow):
         session=self.login_session
         if not session:return
         if time.monotonic()>=session['deadline']:
-            self.login_session=None;self.account_label.setText('登录码已过期，请重新登录。');return
+            self.login_session=None;self.refresh_account_ui();self.account_label.setText('登录码已过期，请重新登录。');return
         if self.job:self.login_timer.start(1000);return
         def received(result):
             if self.login_session is not session:return
             if 'pending' in result:
+                if result['pending']=='network':self.account_label.setText('网络暂时超时，正在自动重试；验证码仍保留。')
                 if result['pending']=='slow_down':session['interval']=session.get('interval',5)+5
                 self.login_timer.start(max(5,session.get('interval',5))*1000);return
             github_auth.save(self.store.root,result);self.account=result;self.login_session=None
-            self.account_label.setText('已登录：'+result['login']);self.status.setText('登录成功，刷新商店即可使用账户身份。')
-        self.busy(lambda:github_auth.poll(session['device_code']),received,'正在等待 GitHub 授权…')
+            self.login_code.clear();self.refresh_account_ui();self.status.setText('登录成功，刷新商店即可使用账户身份。')
+        self.busy(lambda:github_auth.poll(session['device_code'],session),received,'正在等待 GitHub 授权…')
         self.job.failed.connect(lambda _:self.cancel_login_wait())
 
     def cancel_login_wait(self):
-        self.login_session=None;self.login_timer.stop()
-        self.account_label.setText('授权未完成，请重新登录。')
+        self.login_session=None;self.login_timer.stop();self.refresh_account_ui()
+        self.account_label.setText('连接失败，请重新点击登录获取新验证码。')
 
     def logout_github(self):
         self.login_session=None;self.login_timer.stop();github_auth.logout(self.store.root);self.account={}
+        self.login_code.clear();self.refresh_account_ui()
         self.account_label.setText('未登录 · 已清除本机授权。浏览器中的 GitHub 登录不受影响。')
 
     def installed(self):

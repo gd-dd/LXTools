@@ -15,3 +15,13 @@ class AuthTests(unittest.TestCase):
    with self.assertRaises(ValueError):auth.poll('test')
  def test_user_identity(self):
   with patch.object(auth,'post',return_value={'access_token':'test'}),patch('github_api.github_json',return_value={'login':'tester'}):self.assertEqual(auth.poll('test')['login'],'tester')
+
+class RetryTests(unittest.TestCase):
+ def test_timeout_keeps_polling(self):
+  with patch.object(auth,'post',side_effect=TimeoutError()):self.assertEqual(auth.poll('code'),{'pending':'network'})
+ def test_profile_timeout_preserves_received_token(self):
+  session={}
+  with patch.object(auth,'post',return_value={'access_token':'test'}) as post,patch('github_api.github_json',side_effect=[TimeoutError(),{'login':'tester'}]):
+   self.assertEqual(auth.poll('code',session),{'pending':'network'})
+   self.assertEqual(auth.poll('code',session)['login'],'tester')
+   self.assertEqual(post.call_count,1)

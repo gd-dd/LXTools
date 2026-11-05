@@ -4,6 +4,7 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.parse import urlencode
+from urllib.error import URLError, HTTPError
 CLIENT_ID='Ov23liRjA9hGeZqYzn4r'
 class Blob(ctypes.Structure):
     _fields_=[('size',wintypes.DWORD),('data',ctypes.POINTER(ctypes.c_ubyte))]
@@ -32,9 +33,16 @@ def begin():
     result=post('device/code',client_id=CLIENT_ID,scope='read:user')
     if 'device_code' not in result:raise ValueError('无法开始登录，请确认 OAuth App 已开启 Device Flow。')
     return result
-def poll(code):
-    result=post('oauth/access_token',client_id=CLIENT_ID,device_code=code,grant_type='urn:ietf:params:oauth:grant-type:device_code')
+def poll(code,session=None):
+    try:return _poll(code,session)
+    except HTTPError as error:
+        if error.code>=500:return {'pending':'network'}
+        raise
+    except (TimeoutError,URLError,ConnectionError):return {'pending':'network'}
+def _poll(code,session=None):
+    result={'access_token':session['access_token']} if session and session.get('access_token') else post('oauth/access_token',client_id=CLIENT_ID,device_code=code,grant_type='urn:ietf:params:oauth:grant-type:device_code')
     if 'access_token' in result:
+        if session is not None:session['access_token']=result['access_token']
         from github_api import github_json
         user=github_json('/user',result['access_token'])
         return {'token':result['access_token'],'login':user['login']}
