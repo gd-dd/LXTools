@@ -4,7 +4,7 @@ from pathlib import Path
 
 def checked(path,boundary):
     path=Path(path).absolute();boundary=Path(boundary).resolve()
-    if path==boundary or not path.resolve().is_relative_to(boundary):raise ValueError('清理路径越界')
+    if path.resolve()==boundary or not path.resolve().is_relative_to(boundary):raise ValueError('清理路径越界')
     for item in [path]+list(path.parents):
         if item==boundary:break
         if item.exists() and item.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:raise ValueError('保留目录链接，不清理其内容')
