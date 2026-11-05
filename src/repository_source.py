@@ -139,7 +139,7 @@ class RepositoryCatalog:
     def sync(self,token=None):
         repos=[];page=1
         while True:
-            endpoint=(f'/user/repos?affiliation=owner&per_page=100&page={page}' if token else f'/users/{OWNER}/repos?type=owner&per_page=100&page={page}')
+            endpoint=(f'/users/{OWNER}/repos?type=owner&per_page=100&page={page}')
             batch=github_json(endpoint,token)
             if not isinstance(batch,list):raise ValueError('GitHub 仓库列表返回异常')
             repos.extend(r for r in batch if r['owner']['login'].lower()==OWNER)

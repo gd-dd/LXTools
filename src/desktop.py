@@ -23,6 +23,9 @@ from gold_effect import GoldButton
 
 from theme import STYLE
 import development
+import github_auth
+import time
+import webbrowser
 
 
 def label(text, kind=None):
@@ -108,6 +111,9 @@ class Window(QMainWindow):
     def __init__(self, store, tools_root=None, autoload=True):
         super().__init__()
         self.store, self.job = store, None
+        self.account=github_auth.load(store.root)
+        self.login_session=None
+        self.login_timer=QTimer(self);self.login_timer.setSingleShot(True);self.login_timer.timeout.connect(self.poll_login)
         self.development = development.enabled()
         self.display_version = "0.0.0 · 本地开发" if self.development else VERSION
         app_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
@@ -265,10 +271,50 @@ class Window(QMainWindow):
         if result.exists():form.addWidget(label(result.read_text('utf-8'),'subtitle'))
         layout.addWidget(frame)
         frame=QFrame();frame.setObjectName('card');form=QVBoxLayout(frame);form.setContentsMargins(24,20,24,20)
-        form.addWidget(label('账户与工具来源','title'));form.addWidget(label('公开商店可直接使用。GitHub 登录待作者注册应用后启用。','subtitle'))
+        form.addWidget(label('GitHub 账户','title'))
+        self.account_label=label('已登录：'+self.account['login'] if self.account else '未登录 · 公开工具可直接下载','subtitle');form.addWidget(self.account_label)
+        form.addWidget(self.button('登录 GitHub',self.login_github))
+        form.addWidget(self.button('退出登录 / 取消授权等待',self.logout_github))
         form.addWidget(label('自动扫描 gd-dd 的仓库；只有带有效 .lxtool 标识的项目进入商店。一仓库一工具。','subtitle'))
         form.addWidget(self.button('打开本地工具目录',lambda:os.startfile(str(self.tools_root))))
         layout.addWidget(frame);layout.addStretch();self.pages.addWidget(self.settings)
+
+    def login_github(self):
+        if self.job or self.login_session:return
+        attempt=object();self.login_session=attempt
+        def started(data):
+            if self.login_session is not attempt:return
+            self.login_session=dict(data,deadline=time.monotonic()+data['expires_in'])
+            QApplication.clipboard().setText(data['user_code'])
+            self.account_label.setText('登录码：'+data['user_code']+'（已复制） · 请在浏览器授权')
+            webbrowser.open('https://github.com/login/device')
+            self.login_timer.start(max(5,data.get('interval',5))*1000)
+        self.busy(github_auth.begin,started,'正在获取 GitHub 登录码…')
+        self.job.failed.connect(lambda _:self.cancel_login_wait())
+
+    def poll_login(self):
+        session=self.login_session
+        if not session:return
+        if time.monotonic()>=session['deadline']:
+            self.login_session=None;self.account_label.setText('登录码已过期，请重新登录。');return
+        if self.job:self.login_timer.start(1000);return
+        def received(result):
+            if self.login_session is not session:return
+            if 'pending' in result:
+                if result['pending']=='slow_down':session['interval']=session.get('interval',5)+5
+                self.login_timer.start(max(5,session.get('interval',5))*1000);return
+            github_auth.save(self.store.root,result);self.account=result;self.login_session=None
+            self.account_label.setText('已登录：'+result['login']);self.status.setText('登录成功，刷新商店即可使用账户身份。')
+        self.busy(lambda:github_auth.poll(session['device_code']),received,'正在等待 GitHub 授权…')
+        self.job.failed.connect(lambda _:self.cancel_login_wait())
+
+    def cancel_login_wait(self):
+        self.login_session=None;self.login_timer.stop()
+        self.account_label.setText('授权未完成，请重新登录。')
+
+    def logout_github(self):
+        self.login_session=None;self.login_timer.stop();github_auth.logout(self.store.root);self.account={}
+        self.account_label.setText('未登录 · 已清除本机授权。浏览器中的 GitHub 登录不受影响。')
 
     def installed(self):
         tools, errors=discover_tools(self.tools_root)
@@ -453,7 +499,7 @@ class Window(QMainWindow):
             if not self.development:raise ValueError('正式版只接受 Release')
             installer=development.install_branch
         else:installer=install_repository
-        self.busy(lambda:installer(entry,self.tools_root),done,'正在下载并校验工具…')
+        self.busy(lambda:installer(entry,self.tools_root,self.account.get("token")),done,'正在下载并校验工具…')
 
     def activate_selected(self):
         if self.job:return
@@ -512,9 +558,9 @@ class Window(QMainWindow):
             self.status.setText('已扫描 '+str(data.get('scannedRepositories',0))+' 个仓库 · 发现 '+str(len({e['id'] for e in data['packages']}))+' 个 LX 工具'+warning)
             self.status.setToolTip('\n'.join(data.get('warnings',[])))
         def scan():
-            data=AuthorCatalog(self.store.root).sync()
+            data=AuthorCatalog(self.store.root).sync(self.account.get("token"))
             if self.development:
-                branches,warnings=development.scan_branches()
+                branches,warnings=development.scan_branches(self.account.get("token"))
                 data['packages'].extend(branches);data.setdefault('warnings',[]).extend(warnings)
             return data
         self.busy(scan,done,'正在扫描 gd-dd 的仓库并验证 LX 标识…')
@@ -549,7 +595,7 @@ class Window(QMainWindow):
             tag,stage=result
             if not getattr(sys,'frozen',False):self.status.setText('已准备 '+tag+'；源码模式不自动替换，请使用 EXE 测试更新。');return
             if QMessageBox.question(self,'安装工具架更新',tag+' 已下载并校验。现在关闭并更新工具架？已装工具和夹子会保留。')==QMessageBox.StandardButton.Yes:self.restart_updated(stage)
-        self.busy(lambda:prepare_update(self.store.root),done,'正在检查并准备工具架更新…')
+        self.busy(lambda:prepare_update(self.store.root,self.account.get("token")),done,'正在检查并准备工具架更新…')
 
     def restart_updated(self,stage):
         if self.job:
