@@ -1,4 +1,4 @@
-; Build only from the clean PyInstaller output, never from a user's installed tools.
+﻿; Build only from the clean PyInstaller output, never from a user's installed tools.
 #ifndef AppVersion
   #error AppVersion must be supplied by build-installer.ps1
 #endif
@@ -47,6 +47,8 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 [Files]
 Source: "{#ProgramSource}\LXTool.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProgramSource}\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+Source: "{#ProgramSource}\portable.json"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{group}\LXTools"; Filename: "{app}\LXTool.exe"; WorkingDir: "{app}"

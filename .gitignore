@@ -9,3 +9,5 @@ dist/
 
 # Local Windows shortcuts
 *.lnk
+
+/data/

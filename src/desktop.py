@@ -23,6 +23,7 @@ from gold_effect import GoldButton
 
 from theme import STYLE
 import development
+from update_policy import Policy, profile
 import github_auth
 import storage_cleanup
 import time
@@ -112,6 +113,7 @@ class Window(QMainWindow):
     def __init__(self, store, tools_root=None, autoload=True):
         super().__init__()
         self.store, self.job = store, None
+        self.check_job=None;self.policy=Policy(store.root)
         self.account=github_auth.load(store.root)
         self.login_session=None
         self.login_timer=QTimer(self);self.login_timer.setSingleShot(True);self.login_timer.timeout.connect(self.poll_login)
@@ -176,9 +178,9 @@ class Window(QMainWindow):
             self.dev_pending=None
             self.dev_timer=QTimer(self);self.dev_timer.timeout.connect(self.check_development);self.dev_timer.start(1000)
             self.navigate('store')
-            if autoload:QTimer.singleShot(1000,self.sync_catalog)
+            if autoload:QTimer.singleShot(1000,self.background_check)
         if autoload and not self.development and QApplication.platformName() != 'offscreen':
-            QTimer.singleShot(300, self.sync_catalog)
+            QTimer.singleShot(1500, self.background_check)
 
     def button(self, text, fn, kind=None):
         button=GoldButton(text)
@@ -263,8 +265,12 @@ class Window(QMainWindow):
         layout.addWidget(label('设置与更新','title'));layout.addWidget(label('设置创作环境，其余交给工具架。','subtitle'))
         layout.addWidget(label('运行环境由各个工具自行声明，请在对应工具面板中配置。','subtitle'))
         frame=QFrame();frame.setObjectName('card');form=QVBoxLayout(frame);form.setContentsMargins(24,20,24,20)
-        form.addWidget(label('工具架更新','title'));form.addWidget(label('当前版本 '+self.display_version+' · 更新保留已装工具、夹子和软件设置。','subtitle'))
-        self.update_button=self.button('检查并下载更新',self.update_client);form.addWidget(self.update_button)
+        form.addWidget(label('工具架更新','title'))
+        self.check_mode=QComboBox();self.check_mode.addItem('后台检查并提示（每 6 小时，不自动下载）','background');self.check_mode.addItem('仅手动检查（启动不联网）','manual');self.check_mode.setCurrentIndex(1 if self.policy.data.get('mode')=='manual' else 0)
+        self.check_mode.currentIndexChanged.connect(self.save_check_mode);form.addWidget(self.check_mode)
+        form.addWidget(label('当前版本 '+self.display_version+' · 更新保留已装工具、夹子和软件设置。','subtitle'))
+        self.update_button=self.button('检查工具架更新',self.check_client_update);form.addWidget(self.update_button)
+        self.client_download_button=self.button('下载并校验更新',self.update_client);self.client_download_button.hide();form.addWidget(self.client_download_button)
         if self.development:
             self.update_button.setEnabled(False)
             form.addWidget(label('开发版直接运行 project 源码，不接收客户端更新；正式商店仍只列 GitHub Release。','subtitle'))
@@ -374,7 +380,7 @@ class Window(QMainWindow):
     def installed(self):
         tools, errors=discover_tools(self.tools_root)
         known={e['id'] for e in self.catalog.data['packages']}
-        return [t for t in tools if t['id'] in known and (self.development or t.get('distribution')!='github-branch')]
+        return [t for t in tools if self.development or t.get('distribution')!='github-branch']
 
     def navigate(self, mode, folder=None):
         if hasattr(self,'workspace'):self.workspace.shutdown()
@@ -396,6 +402,10 @@ class Window(QMainWindow):
         installed=self.installed();installed_ids={t['id'] for t in installed}
         groups={}
         for entry in sorted(self.catalog.data['packages'],key=version_order,reverse=True):groups.setdefault(entry['id'],entry)
+        if self.view_mode=='library':
+            for tool in installed:
+                if tool['id'] not in groups:
+                    entry=dict(tool);entry['iconData']=base64.b64encode((tool['root']/tool['icon']).read_bytes()).decode();groups[tool['id']]=entry
         count=0
         for entry in groups.values():
             identity=entry['id']
@@ -602,6 +612,23 @@ class Window(QMainWindow):
             stage=self.pending_restart;self.pending_restart=None
             self.guard(lambda:self.restart_updated(stage))
 
+    def save_check_mode(self):
+        self.policy.data['mode']=self.check_mode.currentData();self.policy.save()
+
+    def background_check(self):
+        if self.check_job or self.job or not self.policy.claim():return
+        from github_api import github_json
+        def check():
+            latest=github_json('/repos/gd-dd/LXTools/releases/latest',self.account.get('token'))
+            return latest['tag_name']
+        self.check_job=Job(check)
+        self.check_job.result.connect(lambda tag:self.status.setText('后台检查完成，最新工具架 '+tag+'。需要时可手动检查并下载；工具目录按需刷新。'))
+        self.check_job.failed.connect(lambda _:self.status.setText('后台检查暂不可用，已安装工具与缓存仍可使用。'))
+        self.check_job.finished.connect(self.background_finished);self.check_job.start()
+
+    def background_finished(self):
+        self.check_job.deleteLater();self.check_job=None
+
     def sync_catalog(self):
         def done(data):
             self.catalog.data=data
@@ -642,6 +669,14 @@ class Window(QMainWindow):
         self.workspace.shutdown()
         QApplication.instance().exit(75)
 
+    def check_client_update(self):
+        from github_api import github_json
+        def checked(release):
+            available=Version(release['tag_name'].lstrip('v'))>Version(VERSION)
+            self.client_download_button.setVisible(available)
+            self.status.setText('发现 '+release['tag_name']+'，可按需下载。' if available else '当前已是最新版本。')
+        self.busy(lambda:github_json('/repos/gd-dd/LXTools/releases/latest',self.account.get('token')),checked,'正在检查版本，不下载文件…')
+
     def update_client(self):
         if self.development:
             self.status.setText('本地开发版通过源码更新，不接收 Release 覆盖。');return
@@ -660,6 +695,8 @@ class Window(QMainWindow):
         self.close()
 
     def closeEvent(self,event):
+        if self.check_job:
+            self.check_job.wait(16000)
         if self.job:
             self.status.setText('下载或更新进行中，请完成后关闭。');event.ignore()
         else:
@@ -668,11 +705,14 @@ class Window(QMainWindow):
 
 
 def main():
+    if len(sys.argv)==3 and sys.argv[1]=='--verify-runtime':
+        from runtime_verify import run
+        return run(Path(sys.argv[2]))
     if len(sys.argv)==4 and sys.argv[1]=='--apply-update':
         return apply_update(Path(sys.executable).parent,Path(sys.argv[2]),int(sys.argv[3]))
-    app=QApplication(sys.argv);app.setStyle('Fusion');app.setStyleSheet(STYLE);app.setWindowIcon(QIcon(str(icon_path())))
     project=Path(__file__).resolve().parents[1]
-    root=project/'runtime/development/profile' if development.enabled() else Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'LXTool'
+    root=profile(project if development.enabled() else Path(sys.executable).parent,development.enabled())
+    app=QApplication(sys.argv);app.setStyle('Fusion');app.setStyleSheet(STYLE);app.setWindowIcon(QIcon(str(icon_path())))
     root.mkdir(parents=True,exist_ok=True)
     lock=QLockFile(str(root/'desktop.lock'))
     if not lock.tryLock(100):QMessageBox.information(None,'LXTool','工具架已经运行，请使用现有窗口。');return 0

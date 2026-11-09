@@ -7,10 +7,11 @@ import shutil
 import subprocess
 import sys
 import uuid
+import tempfile
 from packaging.version import Version, InvalidVersion
 from core import ToolStore
 
-VERSION = '0.0.5'
+VERSION = '0.0.6'
 
 
 def prepare_update(root, token=None):
@@ -41,7 +42,25 @@ def prepare_update(root, token=None):
     stage = store.root / 'packages' / tool['id'] / key / 'LXTool'
     if not (stage / 'LXTool.exe').is_file() or not (stage / '_internal').is_dir():
         raise ValueError('更新包结构不完整')
+    if getattr(sys,'frozen',False):stage=detach_stage(stage,Path(sys.executable).parent)
     return latest['tag_name'], stage
+
+
+def detach_stage(stage,target):
+    stage,target=Path(stage).resolve(),Path(target).resolve()
+    if stage==target:raise ValueError('不能把当前程序作为更新源')
+    if not stage.is_relative_to(target):return stage
+    detached=Path(tempfile.mkdtemp(prefix='.lxtool-stage-',dir=target.parent))
+    try:
+        for name in ('LXTool.exe','_internal','portable.json'):
+            source=stage/name
+            if name!='portable.json' and not source.exists():raise ValueError('更新包缺少程序文件')
+            if source.is_dir():shutil.copytree(source,detached/name)
+            elif source.exists():shutil.copy2(source,detached/name)
+        return detached
+    except Exception:
+        if detached.resolve().parent==target.parent and detached.name.startswith('.lxtool-stage-'):shutil.rmtree(detached)
+        raise
 
 
 def replace_program(stage, target):
@@ -77,11 +96,14 @@ def replace_program(stage, target):
         for name in moved:
             os.replace(backup / name, target / name)
         raise
+    if (stage/"portable.json").exists() and not (target/"portable.json").exists():
+        shutil.copy2(stage/"portable.json",target/"portable.json")
     return backup
 
 
 def apply_update(stage, target, pid):
-    root = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'LXTool'
+    from update_policy import profile
+    root = profile(target)
     root.mkdir(parents=True, exist_ok=True)
     log = root / 'update-result.txt'
     try:
