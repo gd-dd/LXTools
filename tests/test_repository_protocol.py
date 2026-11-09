@@ -97,7 +97,7 @@ class RepositoryProtocolTests(unittest.TestCase):
                 if repository!='gd-dd/r42' or path=='.lxtool/releases.json':raise urllib.error.HTTPError('test',404,'missing',None,None)
                 return (package/path).read_bytes()
             catalog=RepositoryCatalog(Path(root)/'config')
-            with patch('repository_source.github_json',side_effect=github),patch('repository_source.read_bytes',side_effect=remote):result=catalog.sync()
+            with patch('repository_source.github_json',side_effect=github),patch('repository_source.read_bytes',side_effect=remote):result=catalog.scan_author()
             self.assertEqual(result['scannedRepositories'],101)
             self.assertEqual(len(result['packages']),1)
             self.assertEqual(result['packages'][0]['id'],'repo-42')
@@ -107,7 +107,7 @@ class RepositoryProtocolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             root=Path(root);package,m,entry=fixture(root/'fixture')
             data,release=release_fixture(package,m,entry)
-            with patch('repository_source.github_json',return_value=release),patch('repository_source.download_release_asset',return_value=data):
+            with patch('repository_source.github_json',side_effect=lambda path,token=None: {'sha':'a'*40} if '/commits/' in path else release),patch('repository_source.read_json',return_value=m),patch('repository_source.download_release_asset',return_value=data):
                 install_repository(entry,root/'installed')
                 self.assertEqual(len(discover_packages(root/'installed')[0]),1)
                 install_repository(entry,root/'installed')

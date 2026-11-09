@@ -29,6 +29,8 @@ def profile(app_root,development=False):
    if not root.is_relative_to(app_root.resolve()) or root==app_root.resolve():raise ValueError('便携相对配置必须是程序目录内的子目录')
  else:return Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'LXTool'
  root.mkdir(parents=True,exist_ok=True)
- for name,child in [('LOCALAPPDATA','local'),('APPDATA','roaming'),('TEMP','temp'),('TMP','temp')]:
+ for name,child in [('LOCALAPPDATA','local'),('APPDATA','roaming'),('TEMP','temp'),('TMP','temp'),('USERPROFILE','user')]:
   folder=root/child;folder.mkdir(exist_ok=True);os.environ[name]=str(folder)
+ for child in ('Desktop','Documents','Downloads'):
+  (root/'user'/child).mkdir(exist_ok=True)
  return root

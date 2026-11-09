@@ -18,9 +18,9 @@ def run(root):
  calls=[]
  def offline(*args,**kwargs):calls.append(args[0]);raise TimeoutError('isolated offline test')
  github_api.github_json=offline
- app=QApplication.instance() or QApplication([])
  entry=root/'entry';entry.mkdir(exist_ok=True);(entry/'portable.json').write_text(json.dumps({'profilePath':str(root/'profile')}))
  resolved=profile(entry);assert resolved==root/'profile'
+ app=QApplication.instance() or QApplication([])
  policy=Policy(root/'profile');policy.data['mode']='manual';policy.save()
  start=time.perf_counter();window=Window(ToolStore(root/'profile'),root/'tools',autoload=True);window.navigate('library');app.processEvents()
  report={'frozen':bool(getattr(sys,'frozen',False)),'windowSeconds':time.perf_counter()-start,'tools':[]}

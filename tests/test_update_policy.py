@@ -37,6 +37,21 @@ class PolicyTests(unittest.TestCase):
     QTest.qWait(350);self.assertEqual(network.call_count,1);w.background_check();self.assertEqual(network.call_count,1)
    w.close()
 
+ def test_portable_userprofile_directories_and_restart(self):
+  with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ):
+   root=Path(tmp).resolve();app=root/'app';app.mkdir()
+   for marker,expected in [({'profile':'data'},app/'data'),({'profilePath':str(root/'outside')},root/'outside')]:
+    (app/'portable.json').write_text(json.dumps(marker))
+    for restart in range(2):
+     os.environ['USERPROFILE']=str(root/'previous-user')
+     self.assertEqual(profile(app),expected)
+     self.assertEqual(Path(os.environ['USERPROFILE']),expected/'user')
+     for child in ('Desktop','Documents','Downloads'):self.assertTrue((expected/'user'/child).is_dir())
+    saved=expected/'user/Documents/keep.txt';saved.write_text('user data');profile(app)
+    self.assertEqual(saved.read_text(),'user data')
+   self.assertEqual(profile(app,development=True),app/'runtime/development/profile')
+   self.assertTrue((Path(os.environ['USERPROFILE'])/'Desktop').is_dir())
+
  def test_update_preserves_custom_portable_and_tools(self):
   from updater import replace_program
   with tempfile.TemporaryDirectory() as tmp:

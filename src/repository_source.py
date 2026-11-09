@@ -53,8 +53,10 @@ def visual_assets(m,reader):
     if image.isNull() or image.width()>1024 or image.height()>1024 or len(icon)>2*1024*1024:raise ValueError('图标必须是有效图片，最大 1024×1024 / 2 MiB')
     readme=checked_bytes(reader(m['readme']),m['files'][m['readme']])
     if len(readme)>256*1024:raise ValueError('Markdown 介绍超过 256 KiB')
-    panel=validate_panel(json.loads(checked_bytes(reader(m['panel']),m['files'][m['panel']])),m)
-    return {'iconData':base64.b64encode(icon).decode(),'readmeText':readme.decode('utf-8-sig'),'panelData':panel}
+    panel_bytes=checked_bytes(reader(m['panel']),m['files'][m['panel']])
+    panel=validate_panel(json.loads(panel_bytes),m)
+    return {'iconData':base64.b64encode(icon).decode(),'readmeText':readme.decode('utf-8-sig'),'panelData':panel,
+            'readmeData':base64.b64encode(readme).decode(),'panelBytes':base64.b64encode(panel_bytes).decode()}
 
 
 def entry_for(repo_id,repository,m,prefix,commit,assets):
@@ -120,6 +122,41 @@ def unpack_release(data):
     return result
 
 
+INDEX_URL='https://raw.githubusercontent.com/gd-dd/LXTools/main/catalog/repo-store.json'
+MAX_INDEX=32*1024*1024
+
+
+def validate_index(data):
+    if not isinstance(data,dict) or data.get('schemaVersion')!=2:raise ValueError('商店索引格式无效')
+    packages=data.get('packages')
+    if not isinstance(packages,list) or not 1<=len(packages)<=1000:raise ValueError('商店索引为空或数量超限，保留原目录')
+    seen=set();repositories={}
+    for e in packages:
+        if not isinstance(e,dict):raise ValueError('工具条目格式无效')
+        m=validate_manifest(e['manifestData'])
+        repo_id=e['repositoryId'];repository=e['repository']
+        if type(repo_id) is not int or repo_id<=0 or e['id']!='repo-'+str(repo_id):raise ValueError('工具身份无效')
+        if not isinstance(repository,str) or not re.fullmatch(OWNER+r'/[A-Za-z0-9_.-]+',repository):raise ValueError('工具作者无效')
+        if repositories.setdefault(repo_id,repository)!=repository:raise ValueError('仓库身份冲突')
+        if any(k!=repo_id and v==repository for k,v in repositories.items()):raise ValueError('仓库身份重复')
+        if not re.fullmatch(r'[a-f0-9]{40}',e['commit']):raise ValueError('提交无效')
+        if e.get('distribution')!='github-release' or e['releaseTag']!='v'+m['version'] or not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',e['releaseTag']):raise ValueError('仅允许稳定 Release')
+        if type(e['releaseId']) is not int or e['releaseId']<=0:raise ValueError('Release 身份无效')
+        if type(e['releaseAsset']['id']) is not int or e['releaseAsset']['id']<=0:raise ValueError('附件身份无效')
+        release_asset({'assets':[e['releaseAsset']]})
+        key=(repo_id,m['version'])
+        if key in seen:raise ValueError('版本重复')
+        seen.add(key)
+        # Release metadata owns these two display fields; original manifest is
+        # retained verbatim for source/package comparison during installation.
+        if any(e.get(k)!=v for k,v in m.items() if k not in ('publishedAt','notes')) or e.get('packagePath')!='':raise ValueError('目录与工具清单不一致')
+        raw={m['icon']:base64.b64decode(e['iconData'],validate=True),m['readme']:base64.b64decode(e['readmeData'],validate=True),m['panel']:base64.b64decode(e['panelBytes'],validate=True)}
+        assets=visual_assets(m,raw.__getitem__)
+        if any(e.get(k)!=v for k,v in assets.items()):raise ValueError('工具预览内容不一致')
+    if not isinstance(data.get('warnings',[]),list) or any(not isinstance(s,str) or len(s)>4096 for s in data.get('warnings',[])):raise ValueError('索引提示无效')
+    return data
+
+
 class RepositoryCatalog:
     def __init__(self,root):
         self.cache=Path(root)/'repository-catalog-v2.json'
@@ -127,16 +164,34 @@ class RepositoryCatalog:
         for path in (resource_path('catalog/repo-store.json'),self.cache):
             if path.exists():
                 try:
-                    data=json.loads(path.read_text('utf-8'))
-                    if data.get('schemaVersion')!=2 or not isinstance(data.get('packages'),list):continue
-                    data['packages']=[e for e in data['packages'] if e.get('distribution')=='github-release']
-                    for e in data['packages']:
-                        validate_manifest(e['manifestData'])
-                        if e['id']!='repo-'+str(e['repositoryId']) or not e['repository'].startswith(OWNER+'/'):raise ValueError('目录身份无效')
+                    if path.stat().st_size>MAX_INDEX:continue
+                    data=validate_index(json.loads(path.read_text('utf-8')))
                     self.data=data
                 except (ValueError,KeyError,TypeError):pass
 
     def sync(self,token=None):
+        # Public author index never receives an OAuth token. ETag is bound to the
+        # exact validated document, persisted atomically in the same cache file.
+        headers={'User-Agent':'LXTool','Accept':'application/json'}
+        etag=self.data.get('_indexEtag')
+        if isinstance(etag,str) and len(etag)<512 and '\n' not in etag and '\r' not in etag:headers['If-None-Match']=etag
+        try:
+            with urllib.request.urlopen(urllib.request.Request(INDEX_URL,headers=headers),timeout=12) as response:
+                payload=response.read(MAX_INDEX+1)
+                if len(payload)>MAX_INDEX:raise ValueError('商店索引超过大小限制')
+                data=validate_index(json.loads(payload))
+                data.pop('_indexEtag',None)
+                fresh_etag=response.headers.get('ETag')
+                if fresh_etag:data['_indexEtag']=fresh_etag
+        except urllib.error.HTTPError as error:
+            if error.code==304 and etag and self.data['packages']:return self.data
+            raise
+        write_json(self.cache,data)
+        self.data=data
+        return data
+
+    def scan_author(self,token=None):
+        """Explicit author-maintenance operation; never called by stable UI."""
         repos=[];page=1
         while True:
             endpoint=(f'/users/{OWNER}/repos?type=owner&per_page=100&page={page}')
@@ -188,8 +243,7 @@ class RepositoryCatalog:
                 warnings.append(repository+'：'+str(error))
                 packages.extend(e for e in self.data['packages'] if e['id']==identity)
         data={'schemaVersion':2,'packages':packages,'warnings':warnings,'scannedRepositories':len(seen),'detectedRepositories':len({e['id'] for e in packages})}
-        write_json(self.cache,data)
-        return data
+        return validate_index(data)
 
 
 def install_repository(entry,destination,token=None):
@@ -201,6 +255,10 @@ def install_repository(entry,destination,token=None):
     if release.get('draft') or release.get('prerelease') or release['tag_name']!=entry['releaseTag']:raise ValueError('Release 状态已变化，请重新扫描')
     asset=release_asset(release)
     if asset!=entry['releaseAsset']:raise ValueError('Release 附件已变化，请重新扫描')
+    commit=github_json(f"/repos/{entry['repository']}/commits/{urllib.parse.quote(entry['releaseTag'],safe='')}",token)['sha']
+    if commit!=entry['commit']:raise ValueError('Release 标签提交已变化，请刷新商店')
+    source=validate_manifest(read_json(entry['repository'],MARKER,commit,token))
+    if source!=entry['manifestData'] or entry['releaseTag']!='v'+source['version']:raise ValueError('Release 源码清单已变化，请刷新商店')
     payload=download_release_asset(entry['repository'],asset,token,tag=entry['releaseTag'])
     files=unpack_release(payload)
     read=lambda path:files[path]

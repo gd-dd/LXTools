@@ -28,14 +28,14 @@ class GitHubReleaseTests(unittest.TestCase):
                 self.assertNotEqual(path,'.lxtool/releases.json')
                 return (package/path).read_bytes()
             with patch('repository_source.github_json',side_effect=github),patch('repository_source.read_bytes',side_effect=read):
-                catalog=RepositoryCatalog(root/'cache');result=catalog.sync()
+                catalog=RepositoryCatalog(root/'cache');result=catalog.scan_author()
                 self.assertEqual([p['version'] for p in result['packages']],['1.0.0'])
                 self.assertEqual(len(result['warnings']),1)
-                with patch('repository_source.github_json',return_value=release),patch('repository_source.download_release_asset',return_value=data):
+                with patch('repository_source.github_json',side_effect=lambda path,token=None: {'sha':'a'*40} if '/commits/' in path else release),patch('repository_source.read_json',return_value=m),patch('repository_source.download_release_asset',return_value=data):
                     install_repository(result['packages'][0],root/'installed')
                 self.assertEqual(len(f.discover_packages(root/'installed')[0]),1)
                 catalog.data=result;pages=[[]]
-                self.assertEqual(catalog.sync()['packages'],[])
+                with self.assertRaises(ValueError):catalog.scan_author()
 
     def test_asset_digest_and_zip_validation_preserve_installed_version(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -46,7 +46,7 @@ class GitHubReleaseTests(unittest.TestCase):
                 self.assertEqual(download_release_asset('gd-dd/example',entry['releaseAsset']),data)
                 bad=dict(entry['releaseAsset'],digest='sha256:'+'0'*64)
                 with self.assertRaises(ValueError):download_release_asset('gd-dd/example',bad)
-            with patch('repository_source.github_json',return_value=release),patch('repository_source.download_release_asset',return_value=data):
+            with patch('repository_source.github_json',side_effect=lambda path,token=None: {'sha':'a'*40} if '/commits/' in path else release),patch('repository_source.read_json',return_value=m),patch('repository_source.download_release_asset',return_value=data):
                 install_repository(entry,root/'installed')
                 buffer=io.BytesIO(data)
                 with zipfile.ZipFile(buffer,'a') as z:z.writestr('undeclared.py','bad')
@@ -64,7 +64,8 @@ class GitHubReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);_,_,entry=f.fixture(root/'fixture')
             (root/'repository-catalog-v2.json').write_text(json.dumps({'schemaVersion':2,'packages':[entry]}),'utf-8')
-            self.assertEqual(RepositoryCatalog(root).data['packages'],[])
+            with patch('repository_source.resource_path',return_value=root/'missing'):
+                self.assertEqual(RepositoryCatalog(root).data['packages'],[])
 
     def test_public_download_uses_version_url_and_checks_digest(self):
         data=b'public zip';asset={'id':123,'size':len(data),'digest':'sha256:'+hashlib.sha256(data).hexdigest()}

@@ -195,7 +195,7 @@ class Window(QMainWindow):
     def build_browse(self):
         self.browse=PageScroll();layout=self.browse.page_layout
         row=QHBoxLayout();self.browse_title=label('发现工具','title');row.addWidget(self.browse_title,1)
-        self.sync_button=self.button('扫描作者仓库',self.sync_catalog);row.addWidget(self.sync_button);layout.addLayout(row)
+        self.sync_button=self.button('刷新工具商店',self.sync_catalog);row.addWidget(self.sync_button);layout.addLayout(row)
         self.hero=QFrame();self.hero.setObjectName('hero');hero=QVBoxLayout(self.hero);hero.setContentsMargins(24,20,24,20)
         hero.addWidget(label('把重复工作交给工具。','title'))
         hero.addWidget(label('浏览作者持续维护的创作工具，按需安装，随时切换版本。','subtitle'))
@@ -286,7 +286,7 @@ class Window(QMainWindow):
         self.logout_button=self.button('退出登录',self.logout_github);form.addWidget(self.logout_button)
         self.account_manage_button=self.button('管理 GitHub 授权',lambda:webbrowser.open('https://github.com/settings/connections/applications/'+github_auth.CLIENT_ID));form.addWidget(self.account_manage_button)
         self.refresh_account_ui()
-        form.addWidget(label('自动扫描 gd-dd 的仓库；只有带有效 .lxtool 标识的项目进入商店。一仓库一工具。','subtitle'))
+        form.addWidget(label('工具目录由作者发布；刷新即可获取可安装版本。一仓库一工具。','subtitle'))
         form.addWidget(self.button('打开本地工具目录',lambda:os.startfile(str(self.tools_root))))
         layout.addWidget(frame)
         cleanup=QFrame();cleanup.setObjectName('card');box=QVBoxLayout(cleanup)
@@ -391,14 +391,14 @@ class Window(QMainWindow):
         self.browse_title.setText(self.library.data['folders'].get(folder,'我的工具') if mode=='library' else '发现工具')
         self.hero.setVisible(mode=='store');self.pages.setCurrentWidget(self.browse);self.render_cards()
         self.install_filter.setVisible(mode=='store');self.sync_button.setVisible(mode=='store')
-        self.sync_button.setText('扫描作者仓库')
+        self.sync_button.setText('刷新工具商店')
 
     def render_cards(self):
         for row in range(self.cards.rowCount()):self.cards.setRowStretch(row,0)
         while self.cards.count():
             item=self.cards.takeAt(0)
             if item.widget():
-                item.widget().hide();item.widget().deleteLater()
+                widget=item.widget();widget.hide();widget.setParent(None);widget.deleteLater()
         installed=self.installed();installed_ids={t['id'] for t in installed}
         groups={}
         for entry in sorted(self.catalog.data['packages'],key=version_order,reverse=True):groups.setdefault(entry['id'],entry)
@@ -637,7 +637,7 @@ class Window(QMainWindow):
             self.category.setCurrentIndex(max(0,self.category.findText(selected)));self.category.blockSignals(False)
             self.render_cards()
             warning=' · '+str(len(data.get('warnings',[])))+' 个仓库需检查' if data.get('warnings') else ''
-            self.status.setText('已扫描 '+str(data.get('scannedRepositories',0))+' 个仓库 · 发现 '+str(len({e['id'] for e in data['packages']}))+' 个 LX 工具'+warning)
+            self.status.setText('商店已刷新 · '+str(len({e['id'] for e in data['packages']}))+' 个 LX 工具'+warning)
             self.status.setToolTip('\n'.join(data.get('warnings',[])))
         def scan():
             data=AuthorCatalog(self.store.root).sync(self.account.get("token"))
@@ -645,7 +645,7 @@ class Window(QMainWindow):
                 branches,warnings=development.scan_branches(self.account.get("token"))
                 data['packages'].extend(branches);data.setdefault('warnings',[]).extend(warnings)
             return data
-        self.busy(scan,done,'正在扫描 gd-dd 的仓库并验证 LX 标识…')
+        self.busy(scan,done,'正在获取作者发布的工具目录…')
 
     def check_development(self):
         current=development.fingerprint(self.project_root)
