@@ -11,8 +11,13 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
 $python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 & $python -m pip install -r requirements-lock.txt
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
-& $python -m unittest discover -s tests -v
-if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+$env:PYTHONFAULTHANDLER='1'
+& $python -B -c "import sys,platform,PySide6,shiboken6;print('Test runtime:',sys.version,platform.platform(),'PySide6',PySide6.__version__,'shiboken6',shiboken6.__version__,flush=True)"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect test runtime' }
+& $python -X faulthandler -m unittest discover -s tests -v
+$testExitCode = $LASTEXITCODE
+Write-Output "Test Python process exit code: $testExitCode"
+if ($testExitCode -ne 0) { throw "Tests failed (Python exit code $testExitCode)" }
 & $python -B -c "import sys,json;sys.path.insert(0,'src');from repository_source import validate_index;validate_index(json.load(open('catalog/repo-store.json',encoding='utf-8')))"
 if ($LASTEXITCODE -ne 0) { throw 'Bundled store index is invalid or empty' }
 & $python -m PyInstaller --noconfirm --windowed --onedir --specpath build --distpath build/packaged --name LXTool --collect-submodules xml --icon "$PSScriptRoot/assets/brand/icon.ico" --add-data "$PSScriptRoot/assets/brand/icon.png;assets/brand" --add-data "$PSScriptRoot/catalog/repo-store.json;catalog" src/desktop.py
