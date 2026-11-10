@@ -59,14 +59,16 @@ class ToolStore:
         try:
             return urllib.request.build_opener(NoRedirect).open(req, timeout=60)
         except urllib.error.HTTPError as err:
+            from github_api import AuthenticationExpired, authenticated_error, http_error_message
+            if authenticated_error(err, token):
+                raise AuthenticationExpired(token) from None
             if binary and err.code in (301, 302, 303, 307, 308):
                 url = err.headers['Location']
                 if not url.startswith('https://'):
                     raise ValueError('拒绝非 HTTPS 下载地址')
                 # Signed download URL gets no Authorization header.
                 return urllib.request.urlopen(url, timeout=60)
-            messages = {401: '凭据无效或已过期', 403: '权限不足或 GitHub 限流，请稍后重试', 404: '仓库或资源不存在，或当前账号无访问权限', 429: 'GitHub 限流，请稍后重试'}
-            raise ValueError(messages.get(err.code, 'GitHub 请求失败：' + str(err.code))) from None
+            raise ValueError(http_error_message(err, '工具架更新')) from None
 
     def releases(self, tool_id):
         tool = self.tool(tool_id)

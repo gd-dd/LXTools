@@ -95,7 +95,7 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse(window.detail.isVisible())
             self.assertEqual(window.workspace.current['version'],'1.0.0')
             window.show_tool('repo-42')
-            with patch.object(window,'busy',side_effect=lambda fn,done,message:done(None)):
+            with patch.object(window,'busy',side_effect=lambda fn,done,message,**options:done(None)):
                 window.install_entry(two)
             self.assertEqual(window.pages.currentWidget(),window.detail)
             window.close()

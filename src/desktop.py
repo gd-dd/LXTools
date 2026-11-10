@@ -94,19 +94,20 @@ class ReleaseList(QTreeWidget):
 class Job(QThread):
     result = Signal(object)
     failed = Signal(str)
-    def __init__(self, fn):
+    auth_invalidated = Signal(object)
+    def __init__(self, fn, *, public=False, token=None, epoch=None):
         super().__init__()
-        self.fn = fn
+        self.fn, self.public, self.token, self.epoch = fn, public, token, epoch
     def run(self):
         try:
-            self.result.emit(self.fn())
+            if self.public:
+                from github_api import public_request
+                value=public_request(self.fn,self.token,lambda:self.auth_invalidated.emit({'token':self.token,'epoch':self.epoch}))
+            else:value=self.fn()
+            self.result.emit(value)
         except Exception as error:
-            from urllib.error import HTTPError
-            message = str(error)
-            if isinstance(error, HTTPError):
-                from github_api import http_error_message
-                message = http_error_message(error, '查询工具版本')
-            self.failed.emit(message)
+            from github_api import error_message
+            self.failed.emit(error_message(error,'网络请求'))
 
 
 class Window(QMainWindow):
@@ -114,7 +115,10 @@ class Window(QMainWindow):
         super().__init__()
         self.store, self.job = store, None
         self.check_job=None;self.policy=Policy(store.root)
-        self.account=github_auth.load(store.root)
+        self.auth_epoch=0;self.auth_notice='';self.credential_issue=False
+        try:self.account=github_auth.load(store.root)
+        except github_auth.CredentialLoadError as error:
+            self.account={};self.auth_notice=str(error);self.credential_issue=True
         self.login_session=None
         self.login_timer=QTimer(self);self.login_timer.setSingleShot(True);self.login_timer.timeout.connect(self.poll_login)
         self.development = development.enabled()
@@ -164,7 +168,10 @@ class Window(QMainWindow):
         body=QWidget(); body_layout=QVBoxLayout(body);body_layout.setContentsMargins(28,24,28,16)
         self.pages=QStackedWidget();body_layout.addWidget(self.pages,1)
         self.progress=QProgressBar();self.progress.setRange(0,0);self.progress.hide();body_layout.addWidget(self.progress)
-        self.status=label('已载入作者目录。公开工具无需登录即可安装。','subtitle');body_layout.addWidget(self.status)
+        self.status=label(self.auth_notice or '已载入作者目录。公开工具无需登录即可安装。','subtitle')
+        status_row=QHBoxLayout();status_row.addWidget(self.status,1)
+        self.reauth_button=self.button('重新登录',self.show_login_settings)
+        self.reauth_button.setVisible(bool(self.auth_notice));status_row.addWidget(self.reauth_button);body_layout.addLayout(status_row)
         root_layout.addWidget(body,1)
         self.build_browse()
         self.build_detail()
@@ -279,10 +286,11 @@ class Window(QMainWindow):
         layout.addWidget(frame)
         frame=QFrame();frame.setObjectName('card');form=QVBoxLayout(frame);form.setContentsMargins(24,20,24,20)
         form.addWidget(label('GitHub 账户','title'))
-        self.account_label=label('已登录：'+self.account['login'] if self.account else '未登录 · 公开工具可直接下载','subtitle');form.addWidget(self.account_label)
+        self.account_label=label('已登录：'+self.account['login'] if self.account else (self.auth_notice or '未登录 · 公开工具可直接下载'),'subtitle');form.addWidget(self.account_label)
         self.login_code=QLineEdit();self.login_code.setReadOnly(True);self.login_code.setAlignment(Qt.AlignCenter);self.login_code.setMinimumHeight(76);self.login_code.setStyleSheet('font-size:32px;font-weight:700;color:#426b20;background:#f5f9ee;border:2px solid #92b854;border-radius:12px;');self.login_code.setPlaceholderText('点击登录后，这里显示验证码');form.addWidget(self.login_code)
         self.copy_code_button=self.button('复制验证码',lambda:QApplication.clipboard().setText(self.login_code.text()));form.addWidget(self.copy_code_button)
         self.login_button=self.button('登录 GitHub',self.login_github);form.addWidget(self.login_button)
+        self.retry_save_button=self.button('重试保存登录',self.poll_login);form.addWidget(self.retry_save_button)
         self.logout_button=self.button('退出登录',self.logout_github);form.addWidget(self.logout_button)
         self.account_manage_button=self.button('管理 GitHub 授权',lambda:webbrowser.open('https://github.com/settings/connections/applications/'+github_auth.CLIENT_ID));form.addWidget(self.account_manage_button)
         self.refresh_account_ui()
@@ -326,18 +334,40 @@ class Window(QMainWindow):
 
     def refresh_account_ui(self):
         logged=bool(self.account);waiting=self.login_session is not None
-        self.login_code.setVisible(not logged and waiting)
-        self.copy_code_button.setVisible(not logged and waiting)
+        completed=isinstance(self.login_session,dict) and bool(self.login_session.get('completed_account'))
+        self.login_code.setVisible(not logged and waiting and not completed)
+        self.copy_code_button.setVisible(not logged and waiting and not completed)
+        self.retry_save_button.setVisible(not logged and completed)
         self.copy_code_button.setEnabled(bool(self.login_code.text()))
         self.login_button.setVisible(not logged and not waiting)
-        self.logout_button.setVisible(logged or waiting)
-        self.logout_button.setText('退出登录' if logged else '取消登录')
+        self.login_button.setText('重新登录 GitHub' if self.auth_notice else '登录 GitHub')
+        self.logout_button.setVisible(logged or waiting or self.credential_issue)
+        self.logout_button.setText('退出登录' if logged else ('取消登录' if waiting else '清除本机登录信息'))
         self.account_manage_button.setVisible(logged)
         self.account_label.setStyleSheet('font-size:22px;font-weight:600;color:#426b20;' if logged else '')
         if logged:self.account_label.setText('✓ 已登录  ·  '+self.account['login'])
 
+    def show_login_settings(self):
+        self.navigate('settings');self.login_button.setFocus()
+
+    def invalidate_account(self,notice):
+        # Requests use an immutable session snapshot. A late 401 cannot erase a
+        # newer login, logout, or an explicitly started replacement login.
+        if notice['epoch']!=self.auth_epoch or not notice['token'] or self.account.get('token')!=notice['token']:return
+        self.auth_epoch+=1;self.account={};self.login_session=None;self.login_timer.stop()
+        self.auth_notice='GitHub 登录已失效，已切换匿名方式。请点击“重新登录”；公开工具仍可使用。'
+        try:
+            cleared=github_auth.logout(self.store.root,expected_token=notice['token'])
+            if not cleared:self.auth_notice+=' 磁盘登录信息未被删除，请在设置中检查。'
+        except OSError as error:
+            self.credential_issue=True
+            self.auth_notice+=' '+(str(error) if isinstance(error,github_auth.CredentialCleanupError) else '本机凭据清理失败，无法保证持久退出；重开仍可能读到旧凭据。请检查配置目录权限。')
+        self.login_code.clear();self.refresh_account_ui();self.account_label.setText(self.auth_notice)
+        self.reauth_button.show();self.status.setText(self.auth_notice)
+
     def login_github(self):
         if self.job or self.login_session:return
+        self.auth_epoch+=1
         attempt=object();self.login_session=attempt
         self.login_code.clear();self.account_label.setText("正在获取验证码…");self.refresh_account_ui()
         def started(data):
@@ -349,33 +379,51 @@ class Window(QMainWindow):
             webbrowser.open('https://github.com/login/device')
             self.login_timer.start(max(5,data.get('interval',5))*1000)
         self.busy(github_auth.begin,started,'正在获取 GitHub 登录码…')
-        self.job.failed.connect(lambda _:self.cancel_login_wait())
+        self.job.failed.connect(lambda message:self.cancel_login_wait(message,attempt))
 
     def poll_login(self):
         session=self.login_session
         if not session:return
-        if time.monotonic()>=session['deadline']:
+        if time.monotonic()>=session['deadline'] and not session.get('completed_account'):
             self.login_session=None;self.refresh_account_ui();self.account_label.setText('登录码已过期，请重新登录。');return
         if self.job:self.login_timer.start(1000);return
         def received(result):
             if self.login_session is not session:return
             if 'pending' in result:
-                if result['pending']=='network':self.account_label.setText('网络暂时超时，正在自动重试；验证码仍保留。')
+                if result['pending']=='network':self.account_label.setText('网络连接暂不可用，请检查网络或代理；验证码仍保留，稍后重试。')
                 if result['pending']=='slow_down':session['interval']=session.get('interval',5)+5
-                self.login_timer.start(max(5,session.get('interval',5))*1000);return
-            github_auth.save(self.store.root,result);self.account=result;self.login_session=None
+                delay=max(5,session.get('interval',5))
+                if result['pending']=='rate_limit':
+                    delay=max(delay,result.get('retry_after',60));self.account_label.setText('GitHub 暂时限流，验证码仍保留，稍后重试。')
+                self.login_timer.start(min(delay,86400)*1000);return
+            session['completed_account']=result
+            try:github_auth.save(self.store.root,result)
+            except (OSError,ValueError):
+                self.login_timer.stop();self.refresh_account_ui()
+                self.account_label.setText('GitHub 授权已完成，但无法保存本机登录信息。请检查配置目录权限并点击“重试保存登录”；无需重新授权。')
+                self.status.setText(self.account_label.text());return
+            self.account=result;self.login_session=None
+            self.auth_epoch+=1;self.auth_notice='';self.credential_issue=False;self.reauth_button.hide()
             self.login_code.clear();self.refresh_account_ui();self.status.setText('登录成功，刷新商店即可使用账户身份。')
-        self.busy(lambda:github_auth.poll(session['device_code'],session),received,'正在等待 GitHub 授权…')
-        self.job.failed.connect(lambda _:self.cancel_login_wait())
+        self.busy(lambda:session['completed_account'] if session.get('completed_account') else github_auth.poll(session['device_code'],session),received,'正在保存 GitHub 登录…' if session.get('completed_account') else '正在等待 GitHub 授权…')
+        self.job.failed.connect(lambda message:self.cancel_login_wait(message,session))
 
-    def cancel_login_wait(self):
+    def cancel_login_wait(self,message='',session=None):
+        if session is not None and self.login_session is not session:return
         self.login_session=None;self.login_timer.stop();self.refresh_account_ui()
-        self.account_label.setText('连接失败，请重新点击登录获取新验证码。')
+        self.account_label.setText(message or '登录未完成，请重新点击登录获取新验证码。')
 
     def logout_github(self):
-        self.login_session=None;self.login_timer.stop();github_auth.logout(self.store.root);self.account={}
+        self.auth_epoch+=1
+        self.login_session=None;self.login_timer.stop();self.account={}
+        self.auth_notice='';self.credential_issue=False
+        try:github_auth.logout(self.store.root)
+        except OSError as error:
+            self.credential_issue=True
+            self.auth_notice=str(error) if isinstance(error,github_auth.CredentialCleanupError) else '无法持久退出，重开仍可能读到旧凭据。请检查目录权限后重试。'
+        self.reauth_button.setVisible(bool(self.auth_notice))
         self.login_code.clear();self.refresh_account_ui()
-        self.account_label.setText('未登录 · 已清除本机授权。浏览器中的 GitHub 登录不受影响。')
+        self.account_label.setText(self.auth_notice or '未登录 · 已清除本机授权。浏览器中的 GitHub 登录不受影响。')
 
     def installed(self):
         tools, errors=discover_tools(self.tools_root)
@@ -564,7 +612,8 @@ class Window(QMainWindow):
             if not self.development:raise ValueError('正式版只接受 Release')
             installer=development.install_branch
         else:installer=install_repository
-        self.busy(lambda:installer(entry,self.tools_root,self.account.get("token")),done,'正在下载并校验工具…')
+        if entry.get('distribution')=='github-branch':self.busy(lambda:installer(entry,self.tools_root,self.account.get('token')),done,'正在下载并校验工具…')
+        else:self.busy(lambda token:installer(entry,self.tools_root,token),done,'正在下载并校验工具…',public=True)
 
     def activate_selected(self):
         if self.job:return
@@ -592,10 +641,15 @@ class Window(QMainWindow):
         self.workspace.config.get('selectedVersions',{}).pop(identity,None);self.workspace.save_config()
         self.render_cards();self.status.setText('已卸载工具全部本地版本。')
 
-    def busy(self,fn,done,message):
+    def busy(self,fn,done,message,public=False):
         if self.job:return
         self.progress.show();self.status.setText(message)
-        self.job=Job(fn);self.job.result.connect(lambda value:self.guard(lambda:done(value)));self.job.failed.connect(lambda message:self.status.setText('未完成：'+message+'。已有工具和目录仍可使用。'))
+        def completed(value):
+            self.guard(lambda:done(value))
+            if self.auth_notice:self.status.setText(self.status.text()+' '+self.auth_notice)
+        self.job=Job(fn,public=public,token=self.account.get('token'),epoch=self.auth_epoch)
+        self.job.auth_invalidated.connect(self.invalidate_account)
+        self.job.result.connect(completed);self.job.failed.connect(lambda message:self.status.setText('未完成：'+message+'。已有工具和目录仍可使用。'+self.auth_notice))
         self.job.finished.connect(self.idle);self.sync_button.setEnabled(False);self.update_button.setEnabled(False)
         for button in (self.install_button,self.download_button,self.activate_button,self.uninstall_button):button.setEnabled(False)
         self.render_cards()
@@ -618,12 +672,13 @@ class Window(QMainWindow):
     def background_check(self):
         if self.check_job or self.job or not self.policy.claim():return
         from github_api import github_json
-        def check():
-            latest=github_json('/repos/gd-dd/LXTools/releases/latest',self.account.get('token'))
+        def check(token):
+            latest=github_json('/repos/gd-dd/LXTools/releases/latest',token)
             return latest['tag_name']
-        self.check_job=Job(check)
-        self.check_job.result.connect(lambda tag:self.status.setText('后台检查完成，最新工具架 '+tag+'。需要时可手动检查并下载；工具目录按需刷新。'))
-        self.check_job.failed.connect(lambda _:self.status.setText('后台检查暂不可用，已安装工具与缓存仍可使用。'))
+        self.check_job=Job(check,public=True,token=self.account.get('token'),epoch=self.auth_epoch)
+        self.check_job.auth_invalidated.connect(self.invalidate_account)
+        self.check_job.result.connect(lambda tag:self.status.setText('后台检查完成，最新工具架 '+tag+'。需要时可手动检查并下载；工具目录按需刷新。 '+self.auth_notice))
+        self.check_job.failed.connect(lambda _:self.status.setText('后台检查暂不可用，已安装工具与缓存仍可使用。 '+self.auth_notice))
         self.check_job.finished.connect(self.background_finished);self.check_job.start()
 
     def background_finished(self):
@@ -675,7 +730,7 @@ class Window(QMainWindow):
             available=Version(release['tag_name'].lstrip('v'))>Version(VERSION)
             self.client_download_button.setVisible(available)
             self.status.setText('发现 '+release['tag_name']+'，可按需下载。' if available else '当前已是最新版本。')
-        self.busy(lambda:github_json('/repos/gd-dd/LXTools/releases/latest',self.account.get('token')),checked,'正在检查版本，不下载文件…')
+        self.busy(lambda token:github_json('/repos/gd-dd/LXTools/releases/latest',token),checked,'正在检查版本，不下载文件…',public=True)
 
     def update_client(self):
         if self.development:
@@ -685,7 +740,7 @@ class Window(QMainWindow):
             tag,stage=result
             if not getattr(sys,'frozen',False):self.status.setText('已准备 '+tag+'；源码模式不自动替换，请使用 EXE 测试更新。');return
             if QMessageBox.question(self,'安装工具架更新',tag+' 已下载并校验。现在关闭并更新工具架？已装工具和夹子会保留。')==QMessageBox.StandardButton.Yes:self.restart_updated(stage)
-        self.busy(lambda:prepare_update(self.store.root,self.account.get("token")),done,'正在检查并准备工具架更新…')
+        self.busy(lambda token:prepare_update(self.store.root,token),done,'正在检查并准备工具架更新…',public=True)
 
     def restart_updated(self,stage):
         if self.job:
