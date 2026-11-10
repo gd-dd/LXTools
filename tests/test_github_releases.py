@@ -27,11 +27,11 @@ class GitHubReleaseTests(unittest.TestCase):
             def read(repo,path,ref,token=None,limit=None):
                 self.assertNotEqual(path,'.lxtool/releases.json')
                 return (package/path).read_bytes()
-            with patch('repository_source.github_json',side_effect=github),patch('repository_source.read_bytes',side_effect=read):
+            with patch('repository_source.github_json',side_effect=github),patch('repository_source.github_commit_sha',return_value='a'*40),patch('repository_source.read_bytes',side_effect=read):
                 catalog=RepositoryCatalog(root/'cache');result=catalog.scan_author()
                 self.assertEqual([p['version'] for p in result['packages']],['1.0.0'])
                 self.assertEqual(len(result['warnings']),1)
-                with patch('repository_source.github_json',side_effect=lambda path,token=None: {'sha':'a'*40} if '/commits/' in path else release),patch('repository_source.read_json',return_value=m),patch('repository_source.download_release_asset',return_value=data):
+                with patch('repository_source.github_json',return_value=release),patch('repository_source.github_commit_sha',return_value='a'*40),patch('repository_source.read_json',return_value=m),patch('repository_source.download_release_asset',return_value=data):
                     install_repository(result['packages'][0],root/'installed')
                 self.assertEqual(len(f.discover_packages(root/'installed')[0]),1)
                 catalog.data=result;pages=[[]]
@@ -46,7 +46,7 @@ class GitHubReleaseTests(unittest.TestCase):
                 self.assertEqual(download_release_asset('gd-dd/example',entry['releaseAsset']),data)
                 bad=dict(entry['releaseAsset'],digest='sha256:'+'0'*64)
                 with self.assertRaises(ValueError):download_release_asset('gd-dd/example',bad)
-            with patch('repository_source.github_json',side_effect=lambda path,token=None: {'sha':'a'*40} if '/commits/' in path else release),patch('repository_source.read_json',return_value=m),patch('repository_source.download_release_asset',return_value=data):
+            with patch('repository_source.github_json',return_value=release),patch('repository_source.github_commit_sha',return_value='a'*40),patch('repository_source.read_json',return_value=m),patch('repository_source.download_release_asset',return_value=data):
                 install_repository(entry,root/'installed')
                 buffer=io.BytesIO(data)
                 with zipfile.ZipFile(buffer,'a') as z:z.writestr('undeclared.py','bad')
@@ -84,7 +84,7 @@ class GitHubReleaseTests(unittest.TestCase):
         from unittest.mock import Mock
         data=b'private zip';asset={'id':123,'size':len(data),'digest':'sha256:'+hashlib.sha256(data).hexdigest()}
         opener=Mock();opener.open.side_effect=HTTPError('https://api.github.com',302,'redirect',{'Location':'https://release-assets.githubusercontent.com/test'},None)
-        with patch('repository_source.urllib.request.build_opener',return_value=opener),patch('repository_source.urllib.request.urlopen',return_value=io.BytesIO(data)) as redirected:
+        with patch('repository_source.urllib.request.build_opener',return_value=opener),patch('repository_source.open_https',return_value=io.BytesIO(data)) as redirected:
             self.assertEqual(download_release_asset('gd-dd/example',asset,'test-token',tag='v1.2.3'),data)
             self.assertIn('/releases/assets/123',opener.open.call_args.args[0].full_url)
             redirected.assert_called_once_with('https://release-assets.githubusercontent.com/test',timeout=60)

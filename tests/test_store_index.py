@@ -56,7 +56,7 @@ class IndexTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);data,m,release=self.fixture(root);e=data['packages'][0]
             for sha,manifest in [('b'*40,m),('a'*40,dict(m,description='changed'))]:
-                with patch('repository_source.github_json',side_effect=lambda path,token=None:{'sha':sha} if '/commits/' in path else release),patch('repository_source.read_json',return_value=manifest),patch('repository_source.download_release_asset') as download:
+                with patch('repository_source.github_json',return_value=release),patch('repository_source.github_commit_sha',return_value=sha),patch('repository_source.read_json',return_value=manifest),patch('repository_source.download_release_asset') as download:
                     with self.assertRaises(ValueError):install_repository(e,root/'tools')
                     download.assert_not_called()
                     self.assertFalse((root/'tools').exists())

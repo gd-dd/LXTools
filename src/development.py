@@ -27,7 +27,7 @@ def fingerprint(project):
 
 
 def scan_branches(token=None):
-    from github_api import github_json
+    from github_api import github_json,github_commit_sha
     from repository_source import read_json, read_bytes, visual_assets, entry_for
     entries, warnings = [], []
     page = 1
@@ -40,8 +40,7 @@ def scan_branches(token=None):
                 repository = repo['full_name']
                 validate_manifest(read_json(repository, MARKER, repo['default_branch'], token))
                 # Resolve once; every resource must come from this immutable commit.
-                from urllib.parse import quote
-                commit = github_json(f'/repos/{repository}/commits/{quote(repo["default_branch"],safe="")}', token)['sha']
+                commit = github_commit_sha(repository,'heads/'+repo['default_branch'],token)
                 original = validate_manifest(read_json(repository, MARKER, commit, token))
                 manifest = dict(original, version='0.0.0', files=dict(original['files']))
                 payload = {original[k]: read_bytes(repository, original[k], commit, token) for k in ('icon', 'readme', 'panel')}
@@ -104,12 +103,11 @@ def install_branch(entry, destination, token=None):
                             raise ValueError('缺少与分支清单匹配的编译文件 Release')
                         payload=download_release_asset(repository,release_asset(release),token)
                     else:
-                        from urllib.request import Request, urlopen
+                        from urllib.request import Request
+                        from http_transport import get_bytes,open_https
                         from urllib.parse import quote
                         url=f'https://github.com/{repository}/releases/download/v{quote(original["version"],safe="")}/LXTool-package.zip'
-                        with urlopen(Request(url,headers={'User-Agent':'LXTool'}),timeout=60) as response:
-                            payload=response.read(512*1024*1024+1)
-                        if len(payload)>512*1024*1024:raise ValueError('编译附件超过大小限制')
+                        payload=get_bytes(lambda:Request(url,headers={'User-Agent':'LXTool'}),stage='下载分支编译附件',max_bytes=512*1024*1024,timeout=60,open_request=open_https)
                     release_files=unpack_release(payload)
                 data=release_files.get(path,b'')
                 if not data or hashlib.sha256(data).hexdigest()!=original['files'][path]:

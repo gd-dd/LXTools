@@ -95,15 +95,18 @@ class Job(QThread):
     result = Signal(object)
     failed = Signal(str)
     auth_invalidated = Signal(object)
+    progress = Signal(str)
     def __init__(self, fn, *, public=False, token=None, epoch=None):
         super().__init__()
         self.fn, self.public, self.token, self.epoch = fn, public, token, epoch
     def run(self):
         try:
-            if self.public:
-                from github_api import public_request
-                value=public_request(self.fn,self.token,lambda:self.auth_invalidated.emit({'token':self.token,'epoch':self.epoch}))
-            else:value=self.fn()
+            from http_transport import progress_reporting
+            with progress_reporting(self.progress.emit):
+                if self.public:
+                    from github_api import public_request
+                    value=public_request(self.fn,self.token,lambda:self.auth_invalidated.emit({'token':self.token,'epoch':self.epoch}))
+                else:value=self.fn()
             self.result.emit(value)
         except Exception as error:
             from github_api import error_message
@@ -649,6 +652,7 @@ class Window(QMainWindow):
             if self.auth_notice:self.status.setText(self.status.text()+' '+self.auth_notice)
         self.job=Job(fn,public=public,token=self.account.get('token'),epoch=self.auth_epoch)
         self.job.auth_invalidated.connect(self.invalidate_account)
+        self.job.progress.connect(lambda message:self.status.setText(message+' '+self.auth_notice))
         self.job.result.connect(completed);self.job.failed.connect(lambda message:self.status.setText('未完成：'+message+'。已有工具和目录仍可使用。'+self.auth_notice))
         self.job.finished.connect(self.idle);self.sync_button.setEnabled(False);self.update_button.setEnabled(False)
         for button in (self.install_button,self.download_button,self.activate_button,self.uninstall_button):button.setEnabled(False)
@@ -677,12 +681,16 @@ class Window(QMainWindow):
             return latest['tag_name']
         self.check_job=Job(check,public=True,token=self.account.get('token'),epoch=self.auth_epoch)
         self.check_job.auth_invalidated.connect(self.invalidate_account)
+        self.check_job.progress.connect(lambda message:self.status.setText('后台检查 · '+message+' '+self.auth_notice))
         self.check_job.result.connect(lambda tag:self.status.setText('后台检查完成，最新工具架 '+tag+'。需要时可手动检查并下载；工具目录按需刷新。 '+self.auth_notice))
         self.check_job.failed.connect(lambda _:self.status.setText('后台检查暂不可用，已安装工具与缓存仍可使用。 '+self.auth_notice))
         self.check_job.finished.connect(self.background_finished);self.check_job.start()
 
     def background_finished(self):
         self.check_job.deleteLater();self.check_job=None
+        if self.pending_restart and not self.job:
+            stage=self.pending_restart;self.pending_restart=None
+            self.guard(lambda:self.restart_updated(stage))
 
     def sync_catalog(self):
         def done(data):
@@ -743,17 +751,15 @@ class Window(QMainWindow):
         self.busy(lambda token:prepare_update(self.store.root,token),done,'正在检查并准备工具架更新…',public=True)
 
     def restart_updated(self,stage):
-        if self.job:
+        if self.job or self.check_job:
             self.pending_restart=stage
             return
         subprocess.Popen([str(stage/'LXTool.exe'),'--apply-update',str(Path(sys.executable).parent),str(os.getpid())],cwd=str(stage))
         self.close()
 
     def closeEvent(self,event):
-        if self.check_job:
-            self.check_job.wait(16000)
-        if self.job:
-            self.status.setText('下载或更新进行中，请完成后关闭。');event.ignore()
+        if self.check_job or self.job:
+            self.status.setText('网络任务进行中，请完成后关闭；工具和登录保持。');event.ignore()
         else:
             self.workspace.shutdown()
             event.accept()

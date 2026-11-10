@@ -7,7 +7,9 @@ import tempfile
 import urllib.request
 import zipfile
 import copy
+import io
 from pathlib import Path
+from http_transport import open_https
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -50,24 +52,27 @@ class ToolStore:
             self.state['tools'].pop()
             raise
 
-    def request(self, tool, path, binary=False):
+    def request(self, tool, path, binary=False, expected_size=None):
+        from http_transport import get_bytes
         headers = {'User-Agent': 'LXTool-Prototype', 'Accept': 'application/octet-stream' if binary else 'application/vnd.github+json'}
         token = self.tokens.get(tool['id'])
         if token:
             headers['Authorization'] = 'Bearer ' + token
-        req = urllib.request.Request('https://api.github.com' + path, headers=headers)
+        headers['Cache-Control']='no-cache'
+        def open_original(request,**options):
+            try:return urllib.request.build_opener(NoRedirect).open(request,**options)
+            except urllib.error.HTTPError as error:
+                if not binary or error.code not in (301,302,303,307,308):raise
+                url=error.headers['Location']
+                if not url.startswith('https://'):raise ValueError('拒绝非 HTTPS 下载地址')
+                return open_https(url,**options)
         try:
-            return urllib.request.build_opener(NoRedirect).open(req, timeout=60)
+            data=get_bytes(lambda:urllib.request.Request('https://api.github.com'+path,headers=headers),stage='下载工具架更新包' if binary else '查询工具架更新',max_bytes=(512 if binary else 16)*1024*1024,expected_size=expected_size,timeout=60,open_request=open_original)
+            return io.BytesIO(data)
         except urllib.error.HTTPError as err:
             from github_api import AuthenticationExpired, authenticated_error, http_error_message
             if authenticated_error(err, token):
                 raise AuthenticationExpired(token) from None
-            if binary and err.code in (301, 302, 303, 307, 308):
-                url = err.headers['Location']
-                if not url.startswith('https://'):
-                    raise ValueError('拒绝非 HTTPS 下载地址')
-                # Signed download URL gets no Authorization header.
-                return urllib.request.urlopen(url, timeout=60)
             raise ValueError(http_error_message(err, '工具架更新')) from None
 
     def releases(self, tool_id):
@@ -100,7 +105,7 @@ class ToolStore:
             archive = staging / 'download.zip'
             digest = hashlib.sha256()
             total = 0
-            with self.request(tool, f"/repos/{tool['repo']}/releases/assets/{asset['id']}", True) as response, archive.open('wb') as out:
+            with self.request(tool, f"/repos/{tool['repo']}/releases/assets/{asset['id']}", True, expected_size=asset['size']) as response, archive.open('wb') as out:
                 while chunk := response.read(1024 * 1024):
                     total += len(chunk)
                     if total > 512 * 1024 * 1024:

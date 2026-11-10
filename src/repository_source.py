@@ -13,7 +13,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from PySide6.QtGui import QImage
-from github_api import github_json, http_error_message
+from github_api import github_json, github_commit_sha, http_error_message, AuthenticationExpired, authenticated_error
+from http_transport import get_bytes,read_get,TransferFailed,open_https,notify_progress
 from core import NoRedirect
 from library import write_json,resource_path
 from lx_protocol import MARKER,validate_manifest,validate_panel,safe_path,checked_bytes
@@ -24,22 +25,21 @@ OWNER='gd-dd'
 
 def read_bytes(repository,path,ref,token=None,limit=64*1024*1024):
     safe_path(path)
-    def api_read():
-        data=github_json(f'/repos/{repository}/contents/{urllib.parse.quote(path,safe="/")}?ref={urllib.parse.quote(ref,safe="")}',token)
+    def api_read(fallback=False):
+        endpoint=f'/repos/{repository}/contents/{urllib.parse.quote(path,safe="/")}?ref={urllib.parse.quote(ref,safe="")}'
+        data=github_json(endpoint,token,attempts=1) if fallback else github_json(endpoint,token)
         if data.get('encoding')!='base64':raise ValueError('仓库文件编码不支持')
         return base64.b64decode(data['content'])
     if token:
         result=api_read()
     else:
         url='https://raw.githubusercontent.com/'+repository+'/'+urllib.parse.quote(ref,safe='')+'/'+urllib.parse.quote(path,safe='/')
-        request=urllib.request.Request(url,headers={'User-Agent':'LXTool'})
-        try:
-            with urllib.request.urlopen(request,timeout=15) as response:result=response.read(limit+1)
-        except urllib.error.HTTPError as error:
-            if error.code==404:raise
-            result=api_read()
-        except (urllib.error.URLError,TimeoutError,OSError):
-            result=api_read()
+        try:result=get_bytes(lambda:urllib.request.Request(url,headers={'User-Agent':'LXTool'}),stage='读取工具清单/资源',max_bytes=limit,timeout=15,attempts=2)
+        except TransferFailed:
+            # Preserve raw-domain fallback without exceeding 3 total GETs.
+            notify_progress('读取工具清单/资源：通过 GitHub API 获取同一提交（第 3/3 次）…')
+            try:result=api_read(fallback=True)
+            except TransferFailed as error:raise TransferFailed('读取工具清单/资源（raw 与 API）',3,error) from None
     if len(result)>limit:raise ValueError('工具资源超过大小限制')
     return result
 
@@ -89,18 +89,19 @@ def download_release_asset(repository,asset,token=None,tag=None):
         url=f"https://api.github.com/repos/{repository}/releases/assets/{int(asset['id'])}"
     headers={'User-Agent':'LXTool','Accept':'application/octet-stream','Cache-Control':'no-cache'}
     if token:headers['Authorization']='Bearer '+token
-    request=urllib.request.Request(url,headers=headers)
-    try:
+    def open_asset(request,**options):
         try:
-            response=urllib.request.build_opener(NoRedirect).open(request,timeout=60)
+            return urllib.request.build_opener(NoRedirect).open(request,**options)
         except urllib.error.HTTPError as error:
             if error.code not in (301,302,303,307,308):raise
-            url=error.headers['Location']
-            if urllib.parse.urlparse(url).scheme!='https':raise ValueError('附件下载必须使用 HTTPS')
+            signed_url=error.headers['Location']
+            if urllib.parse.urlparse(signed_url).scheme!='https':raise ValueError('附件下载必须使用 HTTPS')
             # Never forward credentials to the signed asset URL.
-            response=urllib.request.urlopen(url,timeout=60)
-        with response:data=response.read(MAX_PACKAGE+1)
+            return open_https(signed_url,**options)
+    try:
+        data=get_bytes(lambda:urllib.request.Request(url,headers=headers),stage='下载工具附件',max_bytes=MAX_PACKAGE,expected_size=asset['size'],timeout=60,open_request=open_asset)
     except urllib.error.HTTPError as error:
+        if authenticated_error(error,token):raise AuthenticationExpired(token) from None
         raise RuntimeError(http_error_message(error,'下载工具附件')) from error
     if len(data)!=asset['size'] or len(data)>MAX_PACKAGE:raise ValueError('附件大小不匹配')
     return checked_bytes(data,asset['digest'].removeprefix('sha256:'))
@@ -176,13 +177,11 @@ class RepositoryCatalog:
         etag=self.data.get('_indexEtag')
         if isinstance(etag,str) and len(etag)<512 and '\n' not in etag and '\r' not in etag:headers['If-None-Match']=etag
         try:
-            with urllib.request.urlopen(urllib.request.Request(INDEX_URL,headers=headers),timeout=12) as response:
-                payload=response.read(MAX_INDEX+1)
-                if len(payload)>MAX_INDEX:raise ValueError('商店索引超过大小限制')
-                data=validate_index(json.loads(payload))
-                data.pop('_indexEtag',None)
-                fresh_etag=response.headers.get('ETag')
-                if fresh_etag:data['_indexEtag']=fresh_etag
+            payload,response_headers=read_get(lambda:urllib.request.Request(INDEX_URL,headers=headers),stage='刷新工具商店',max_bytes=MAX_INDEX,timeout=12)
+            data=validate_index(json.loads(payload))
+            data.pop('_indexEtag',None)
+            fresh_etag=response_headers.get('ETag')
+            if fresh_etag:data['_indexEtag']=fresh_etag
         except urllib.error.HTTPError as error:
             if error.code==304 and etag and self.data['packages']:return self.data
             raise
@@ -228,7 +227,7 @@ class RepositoryCatalog:
                         tag=release['tag_name']
                         if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',tag):continue
                         asset=release_asset(release)
-                        commit=github_json(f'/repos/{repository}/commits/{urllib.parse.quote(tag,safe="")}',token)['sha']
+                        commit=github_commit_sha(repository,'tags/'+tag,token)
                         m=validate_manifest(read_json(repository,MARKER,commit,token))
                         if tag!='v'+m['version'] or m['version'] in versions:raise ValueError('Release 标签与工具版本不一致或重复')
                         assets=visual_assets(m,lambda p:read_bytes(repository,p,commit,token))
@@ -255,7 +254,7 @@ def install_repository(entry,destination,token=None):
     if release.get('draft') or release.get('prerelease') or release['tag_name']!=entry['releaseTag']:raise ValueError('Release 状态已变化，请重新扫描')
     asset=release_asset(release)
     if asset!=entry['releaseAsset']:raise ValueError('Release 附件已变化，请重新扫描')
-    commit=github_json(f"/repos/{entry['repository']}/commits/{urllib.parse.quote(entry['releaseTag'],safe='')}",token)['sha']
+    commit=github_commit_sha(entry['repository'],'tags/'+entry['releaseTag'],token)
     if commit!=entry['commit']:raise ValueError('Release 标签提交已变化，请刷新商店')
     source=validate_manifest(read_json(entry['repository'],MARKER,commit,token))
     if source!=entry['manifestData'] or entry['releaseTag']!='v'+source['version']:raise ValueError('Release 源码清单已变化，请刷新商店')

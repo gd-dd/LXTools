@@ -127,7 +127,7 @@ class DevelopmentTests(unittest.TestCase):
             with zipfile.ZipFile(archive,'w') as z:
                 z.writestr('bin/worker.exe',b'wrong binary')
                 z.writestr('.lxtool/manifest.json',json.dumps(m))
-            with patch('repository_source.read_json',return_value=m), patch('repository_source.read_bytes',side_effect=read), patch('urllib.request.urlopen',return_value=io.BytesIO(archive.getvalue())):
+            with patch('repository_source.read_json',return_value=m), patch('repository_source.read_bytes',side_effect=read), patch('http_transport.open_https',return_value=io.BytesIO(archive.getvalue())):
                 with self.assertRaisesRegex(ValueError,'摘要不匹配'):
                     development.install_branch(entry,root/'tools')
             self.assertFalse((root/'tools/example--42/versions/0.0.0').exists())

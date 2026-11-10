@@ -66,7 +66,7 @@ class StoreTests(unittest.TestCase):
             store.add('example/tool', 'Unity')
             tool = store.state['tools'][0]
             asset = {'id': 1, 'name': 'tool.zip', 'size': len(payload), 'digest': 'sha256:' + hashlib.sha256(payload).hexdigest()}
-            def request(_tool, _path, binary=False):
+            def request(_tool, _path, binary=False, **options):
                 return io.BytesIO(payload if binary else json.dumps(asset).encode())
             with patch.object(store, 'request', side_effect=request), patch.object(store, 'releases', return_value=[{'tag': 'v1', 'assets': [asset]}]):
                 store.install(tool['id'], 1)

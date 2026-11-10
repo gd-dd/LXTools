@@ -7,7 +7,9 @@ import urllib.error
 import urllib.parse
 import socket
 import ssl
+import re
 from datetime import datetime
+from http_transport import read_get, TransferFailed
 
 
 class AuthenticationExpired(RuntimeError):
@@ -44,21 +46,37 @@ def public_request(operation, token=None, invalidated=None):
         return operation(None)
 
 
-def github_json(path, token=None):
-    headers = {'User-Agent': 'LXTool', 'Accept': 'application/vnd.github+json'}
+def _github_bytes(path,token,accept,limit,stage,with_headers=False,attempts=3):
+    headers = {'User-Agent': 'LXTool', 'Accept': accept,'Cache-Control':'no-cache'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     try:
         with _request_lock:
-            with urllib.request.build_opener(GitHubRedirect).open(urllib.request.Request('https://api.github.com' + path, headers=headers), timeout=12) as response:
-                return json.load(response)
+            payload=read_get(lambda:urllib.request.Request('https://api.github.com'+path,headers=headers),stage=stage,max_bytes=limit,timeout=12,attempts=attempts,
+                             open_request=lambda request,**options:urllib.request.build_opener(GitHubRedirect).open(request,**options))
+            return payload if with_headers else payload[0]
     except urllib.error.HTTPError as error:
         if authenticated_error(error, token):
             raise AuthenticationExpired(token) from None
         raise
 
 
+def github_json(path, token=None, *, attempts=3):
+    return json.loads(_github_bytes(path,token,'application/vnd.github+json',16*1024*1024,'读取 GitHub 版本信息',attempts=attempts))
+
+
+def github_commit_sha(repository,ref,token=None):
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repository) or not isinstance(ref,str) or not ref.startswith(('tags/','heads/')) or not ref.split('/',1)[1]:
+        raise ValueError('提交查询必须指定仓库和明确的 tag/branch ref')
+    path=f'/repos/{repository}/commits/{urllib.parse.quote(ref,safe="")}'
+    value,headers=_github_bytes(path,token,'application/vnd.github.sha',64,'核对版本提交 SHA',with_headers=True)
+    if headers.get('Content-Type','').split(';',1)[0].strip().lower()!='application/vnd.github.sha':raise ValueError('GitHub 提交响应媒体类型无效')
+    if not re.fullmatch(b'[a-f0-9]{40}',value):raise ValueError('GitHub 未返回有效的 40 位提交 SHA')
+    return value.decode('ascii')
+
+
 def error_message(error, stage='网络请求'):
+    if isinstance(error,TransferFailed):return str(error)
     if isinstance(error, urllib.error.HTTPError):
         return http_error_message(error, stage)
     reason = error.reason if isinstance(error, urllib.error.URLError) else error

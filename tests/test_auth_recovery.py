@@ -98,9 +98,11 @@ class TransportRecoveryTests(unittest.TestCase):
                 calls.append((path,token))
                 if token:raise api.AuthenticationExpired(token)
                 return {'sha':'a'*40} if '/commits/' in path else release
+            def commit(repository,ref,token=None):
+                calls.append(('sha-only',token));return 'a'*40
             class Opener:
                 def open(self,*a,**kw):return io.BytesIO(payload)
-            with patch('repository_source.github_json',side_effect=github),patch('repository_source.read_json',return_value=manifest),patch('repository_source.urllib.request.build_opener',return_value=Opener()):
+            with patch('repository_source.github_json',side_effect=github),patch('repository_source.github_commit_sha',side_effect=commit),patch('repository_source.read_json',return_value=manifest),patch('repository_source.urllib.request.build_opener',return_value=Opener()):
                 installed=api.public_request(lambda token:source.install_repository(entry,root/'installed',token),'old')
                 self.assertTrue((Path(installed)/'payload.txt').is_file())
                 self.assertEqual([token for _,token in calls],['old',None,None])

@@ -11,7 +11,7 @@ import tempfile
 from packaging.version import Version, InvalidVersion
 from core import ToolStore
 
-VERSION = '0.0.7'
+VERSION = '0.0.8'
 
 
 def prepare_update(root, token=None):
