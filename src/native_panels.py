@@ -15,7 +15,8 @@ from lx_protocol import safe_path, checked_bytes, validate_panel
 class PanelContext:
     api_version = 1
 
-    def __init__(self, tool, config_root):
+    def __init__(self, tool, config_root, workspace_state=None):
+        self.workspace_state = workspace_state if workspace_state is not None else {}
         self.identity = tool['id']
         if not re.fullmatch(r'repo-[0-9]+', self.identity):
             raise ValueError('工具身份无效')
@@ -78,11 +79,11 @@ class _Finder(importlib.abc.MetaPathFinder):
 
 
 class NativePanelHandle:
-    def __init__(self, tool, config_root, parent):
+    def __init__(self, tool, config_root, parent, workspace_state=None):
         spec = validate_panel(tool['panelData'], tool)
         self.widget = None
         self.namespace = '_lx_panel_' + uuid.uuid4().hex
-        self.context = PanelContext(tool, config_root)
+        self.context = PanelContext(tool, config_root, workspace_state)
         self.finder = _Finder(self.namespace, self.context, Path(spec['entry']).parent)
         # Validate the entire package before any tool-owned Python executes.
         for relative in self.context._files:

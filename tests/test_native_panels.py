@@ -98,7 +98,7 @@ class NativePanelTests(unittest.TestCase):
             bad=native_fixture(root/'tools','2.0.0',code='def create_panel(context,parent):return 12')
             with self.assertRaisesRegex(TypeError,'QWidget'):NativePanelHandle(bad,root/'config',parent)
 
-    def test_navigation_disposes_panel_without_executing_during_discovery(self):
+    def test_running_tab_retains_panel_until_closed(self):
         from desktop import Window
         from core import ToolStore
         from repository_source import visual_assets,entry_for
@@ -110,12 +110,45 @@ class NativePanelTests(unittest.TestCase):
             window.show_tool('repo-42')
             self.assertFalse(getattr(window.workspace,'native_panel',None))
             window.navigate('library');window.open_tool_panel('repo-42')
-            handle=window.workspace.native_panel
+            handle=window.running_tools['repo-42'].native_panel
             self.assertIsNotNone(handle.widget)
             window.navigate('store')
-            self.assertIsNone(window.workspace.native_panel)
+            self.assertIsNotNone(handle.widget)
+            window.close_running_tool(0)
+            self.assertIsNone(handle.widget)
             self.assertTrue((handle.context.data_root/'closed.txt').exists())
             window.close()
+
+
+    def test_cross_tool_navigation_retains_both_sessions(self):
+        from unittest.mock import patch
+        from desktop import Window
+        from core import ToolStore
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            first=native_fixture(root/'one')
+            second=dict(native_fixture(root/'two'),id='repo-43',name='Animation')
+            window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
+            try:
+                with patch.object(window,'installed',return_value=[first,second]):
+                    window.open_workflow_tool('repo-42')
+                    one=window.running_tools['repo-42'].native_panel
+                    one.widget.max_connection_status=lambda:'Max 已连接'
+                    one.widget.button.click()
+                    one.context.workspace_state['max_target']=(42,'123')
+                    one.context.workspace_state['open_tool']('repo-43')
+                    two=window.running_tools['repo-43'].native_panel
+                    self.assertEqual(window.running_tabs.count(),2)
+                    self.assertEqual(two.context.workspace_state['max_target'],(42,'123'))
+                    self.assertIn('Max 已连接',window.running_tabs.tabText(0))
+                    window.running_tabs.setCurrentIndex(0)
+                    self.assertIs(window.tool_panel.currentWidget(),window.running_tools['repo-42'])
+                    self.assertEqual(one.widget.button.text(),'1')
+                    window.close_running_tool(0)
+                    self.assertIsNone(one.widget)
+                    self.assertIsNotNone(two.widget)
+            finally:
+                window.close()
 
 
 if __name__=='__main__':unittest.main()

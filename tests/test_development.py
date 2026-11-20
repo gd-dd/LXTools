@@ -108,8 +108,8 @@ class DevelopmentTests(unittest.TestCase):
                 self.assertTrue(window.download_button.isEnabled())
                 self.assertEqual(window.download_button.text(),'更新分支快照')
                 window.navigate('library');window.open_tool_panel(branch['id'])
-                self.assertEqual(window.workspace.current['version'],'0.0.0')
-                self.assertEqual(window.workspace.current['distribution'],'github-branch')
+                self.assertEqual(window.running_tools[branch['id']].current['version'],'0.0.0')
+                self.assertEqual(window.running_tools[branch['id']].current['distribution'],'github-branch')
             finally:
                 window.dev_timer.stop();window.close()
 

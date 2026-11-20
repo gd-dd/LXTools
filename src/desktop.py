@@ -4,13 +4,14 @@ import base64
 import json
 import sys
 import subprocess
+import weakref
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QLockFile, QTimer, QSize
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGridLayout, QLabel, QPushButton, QLineEdit, QComboBox, QListWidget, QListWidgetItem,
-    QInputDialog, QMessageBox, QFileDialog, QProgressBar, QStackedWidget, QFrame,
-    QScrollArea, QTreeWidget, QTreeWidgetItem, QTextBrowser, QLayout, QHeaderView, QSizePolicy)
+    QGridLayout, QLabel, QPushButton, QLineEdit, QComboBox,
+    QMessageBox, QFileDialog, QProgressBar, QStackedWidget, QFrame,
+    QScrollArea, QTreeWidget, QTreeWidgetItem, QTextBrowser, QLayout, QHeaderView, QSizePolicy, QTabBar)
 from packaging.version import Version, InvalidVersion
 from core import ToolStore
 from repository_panels import RepositoryWorkspace as ToolWorkspace
@@ -155,20 +156,19 @@ class Window(QMainWindow):
             button = self.button(title, lambda k=key:self.navigate(k), 'nav')
             button.setCheckable(True); side.addWidget(button); self.nav[key]=button
         side.addSpacing(20)
-        folder_header = QHBoxLayout(); folder_header.addWidget(label('我的夹子', 'subtitle'))
-        folder_header.addWidget(self.button('+', self.create_folder)); side.addLayout(folder_header)
-        self.folders = QListWidget(); self.folders.setMaximumHeight(270)
-        self.folders.currentItemChanged.connect(self.folder_selected)
-        side.addWidget(self.folders)
-        folder_actions=QHBoxLayout()
-        folder_actions.addWidget(self.button('改名', self.rename_folder))
-        folder_actions.addWidget(self.button('移除', self.remove_folder))
-        side.addLayout(folder_actions)
         side.addStretch()
         side.addWidget(label('作者精选 · 按需安装', 'subtitle'))
         side.addWidget(label('LXTool  ' + self.display_version, 'subtitle'))
         root_layout.addWidget(sidebar)
         body=QWidget(); body_layout=QVBoxLayout(body);body_layout.setContentsMargins(28,24,28,16)
+        self.running_tabs=QTabBar()
+        self.running_tabs.setTabsClosable(True)
+        self.running_tabs.setExpanding(False)
+        self.running_tabs.hide()
+        self.running_tabs.currentChanged.connect(self.focus_running_tool)
+        self.running_tabs.tabBarClicked.connect(self.focus_running_tool)
+        self.running_tabs.tabCloseRequested.connect(self.close_running_tool)
+        body_layout.addWidget(self.running_tabs)
         self.pages=QStackedWidget();body_layout.addWidget(self.pages,1)
         self.progress=QProgressBar();self.progress.setRange(0,0);self.progress.hide();body_layout.addWidget(self.progress)
         self.status=label(self.auth_notice or '已载入作者目录。公开工具无需登录即可安装。','subtitle')
@@ -180,7 +180,6 @@ class Window(QMainWindow):
         self.build_detail()
         self.build_tool_panel()
         self.build_settings()
-        self.refresh_folders()
         self.navigate('store')
         if self.development:
             self.project_root=app_root
@@ -249,26 +248,106 @@ class Window(QMainWindow):
         layout.addWidget(releases);self.pages.addWidget(self.detail)
 
     def build_tool_panel(self):
-        self.tool_panel=QWidget();layout=QVBoxLayout(self.tool_panel);layout.setContentsMargins(0,0,0,0)
-        row=QHBoxLayout();row.addWidget(self.button('‹ 返回我的工具',lambda:self.navigate('library',self.folder_id)))
-        self.panel_title=label('','title');row.addWidget(self.panel_title,1)
-        row.addWidget(label('收纳到','subtitle'));self.move_combo=QComboBox();self.move_combo.setMinimumWidth(140)
-        self.move_combo.currentIndexChanged.connect(self.move_tool);row.addWidget(self.move_combo);layout.addLayout(row)
+        self.tool_panel=QStackedWidget()
         self.workspace=ToolWorkspace(self.tools_root,self.store.root,managed=True)
-        layout.addWidget(self.workspace,1);self.pages.addWidget(self.tool_panel)
+        self.running_tools={}
+        window_ref=weakref.ref(self)
+        def open_tool(identity):
+            window=window_ref()
+            if window is None:
+                raise ValueError('工具架已关闭。')
+            window.open_workflow_tool(identity)
+        self.workspace.workspace_state['open_tool']=open_tool
+        self.pages.addWidget(self.tool_panel)
+        self.connection_timer=QTimer(self)
+        self.connection_timer.timeout.connect(self.refresh_running_connections)
+        self.connection_timer.start(500)
+
+    def focus_running_tool(self,index):
+        if index<0:
+            return
+        identity=self.running_tabs.tabData(index)
+        if identity not in self.running_tools:
+            return
+        workspace=self.running_tools[identity]
+        self.current_id=identity
+        previous=self.running_tabs.blockSignals(True)
+        try:
+            self.running_tabs.setCurrentIndex(index)
+        finally:
+            self.running_tabs.blockSignals(previous)
+        self.tool_panel.setCurrentWidget(workspace)
+        self.pages.setCurrentWidget(self.tool_panel)
+
+    def close_running_tool(self,index,*,restore_focus=True):
+        identity=self.running_tabs.tabData(index)
+        workspace=self.running_tools.pop(identity)
+        visible=self.pages.currentWidget()==self.tool_panel and self.tool_panel.currentWidget()==workspace
+        workspace.shutdown()
+        self.tool_panel.removeWidget(workspace)
+        previous=self.running_tabs.blockSignals(True)
+        try:
+            self.running_tabs.removeTab(index)
+        finally:
+            self.running_tabs.blockSignals(previous)
+        workspace.deleteLater()
+        self.running_tabs.setVisible(bool(self.running_tools))
+        if visible and restore_focus and self.running_tools:
+            self.focus_running_tool(self.running_tabs.currentIndex())
+        elif visible and restore_focus:
+            self.navigate('library')
+
+    def close_tool_by_id(self,identity):
+        for index in range(self.running_tabs.count()):
+            if self.running_tabs.tabData(index)==identity:
+                self.close_running_tool(index)
+                return
+
+    def shutdown_running_tools(self):
+        for index in reversed(range(self.running_tabs.count())):
+            self.close_running_tool(index,restore_focus=False)
+
+    def refresh_running_connections(self):
+        for index in range(self.running_tabs.count()):
+            workspace=self.running_tools[self.running_tabs.tabData(index)]
+            panel=getattr(getattr(workspace,'native_panel',None),'widget',None)
+            status=getattr(panel,'max_connection_status',None)
+            title=workspace.current['name']
+            if callable(status):
+                title+=' · '+status()
+            if self.running_tabs.tabText(index)!=title:
+                self.running_tabs.setTabText(index,title)
+
+    def open_workflow_tool(self,identity):
+        if not any(tool['id']==identity for tool in self.installed()):
+            raise ValueError('请先从“发现工具”安装该工具。')
+        if self.view_mode!='library':
+            self.navigate('library')
+        self.open_tool_panel(identity)
 
     def open_tool_panel(self,identity):
         if self.view_mode!='library':raise ValueError('请从“我的工具”打开工具面板')
         installed=[t for t in self.installed() if t['id']==identity]
         if not installed:raise ValueError('此工具尚未下载，请到“发现工具”安装')
         active=self.active_key(identity,installed)
-        tool=next(t for t in installed if t['version']==active)
-        self.current_id=identity;self.panel_title.setText(tool['name']+' · '+tool['version'])
-        self.move_combo.blockSignals(True);self.move_combo.clear();self.move_combo.addItem('未分类',None)
-        for key,name in self.library.data['folders'].items():self.move_combo.addItem(name,key)
-        self.move_combo.setCurrentIndex(max(0,self.move_combo.findData(self.library.data['assignments'].get(identity))))
-        self.move_combo.blockSignals(False)
-        self.workspace.display(tool);self.pages.setCurrentWidget(self.tool_panel)
+        tool=next(t for t in installed if package_key(t)==active)
+        workspace=self.running_tools.get(identity)
+        if workspace is None:
+            workspace=ToolWorkspace(self.tools_root,self.store.root,managed=True)
+            workspace.config=self.workspace.config
+            workspace.workspace_state=self.workspace.workspace_state
+            workspace.display(tool)
+            self.running_tools[identity]=workspace
+            self.tool_panel.addWidget(workspace)
+            index=self.running_tabs.addTab(tool['name'])
+            self.running_tabs.setTabData(index,identity)
+            self.running_tabs.show()
+        else:
+            index=next(i for i in range(self.running_tabs.count()) if self.running_tabs.tabData(i)==identity)
+            if package_key(workspace.current)!=active:
+                workspace.display(tool)
+        self.focus_running_tool(index)
+        self.refresh_running_connections()
 
     def build_settings(self):
         self.settings=PageScroll();layout=self.settings.page_layout;layout.setContentsMargins(0,0,0,0);layout.setSpacing(18)
@@ -327,7 +406,7 @@ class Window(QMainWindow):
         total=sum(storage_cleanup.size(path) for path,_ in verified)
         detail='预计释放 %.1f MB。删除后无法本地回退，需要重新下载。\n\n'%(total/1024/1024)+'\n'.join(str(path) for path,_ in verified)
         if QMessageBox.question(self,'确认清理',detail)!=QMessageBox.Yes:return
-        self.workspace.shutdown()
+        self.shutdown_running_tools()
         failures=[]
         for path,boundary in verified:
             try:storage_cleanup.remove(path,boundary)
@@ -434,7 +513,6 @@ class Window(QMainWindow):
         return [t for t in tools if self.development or t.get('distribution')!='github-branch']
 
     def navigate(self, mode, folder=None):
-        if hasattr(self,'workspace'):self.workspace.shutdown()
         selected_mode=mode
         self.view_mode=mode;self.folder_id=folder
         for key,button in self.nav.items():button.setChecked(key==selected_mode)
@@ -515,37 +593,6 @@ class Window(QMainWindow):
             self.cards.addWidget(widget, i // columns, i % columns)
         self.cards.setColumnStretch(0, 1)
         self.cards.setColumnStretch(1, 1 if columns == 2 else 0)
-
-    def refresh_folders(self):
-        self.folders.blockSignals(True);self.folders.clear()
-        for key,name in self.library.data['folders'].items():
-            item=QListWidgetItem(name);item.setData(256,key);self.folders.addItem(item)
-            if key==self.folder_id:self.folders.setCurrentItem(item)
-        self.folders.blockSignals(False)
-
-    def folder_selected(self, item, *_):
-        if item:self.navigate('library',item.data(256))
-
-    def create_folder(self):
-        name,ok=QInputDialog.getText(self,'新建夹子','给夹子起个名字，例如：角色动画')
-        if ok:
-            key=self.library.create_folder(name);self.folder_id=key;self.refresh_folders();self.navigate('library',key)
-
-    def rename_folder(self):
-        item=self.folders.currentItem()
-        if not item:raise ValueError('先选择左侧的夹子')
-        key=item.data(256);name,ok=QInputDialog.getText(self,'重命名夹子','夹子名称',text=self.library.data['folders'][key])
-        if ok:self.library.rename_folder(key,name);self.refresh_folders();self.navigate('library',key)
-
-    def remove_folder(self):
-        item=self.folders.currentItem()
-        if not item:raise ValueError('先选择左侧的夹子')
-        if QMessageBox.question(self,'移除夹子','只移除夹子，里面的工具仍保留在“我的工具”。')!=QMessageBox.StandardButton.Yes:return
-        self.library.remove_folder(item.data(256));self.folder_id=None;self.refresh_folders();self.navigate('library')
-
-    def move_tool(self):
-        if self.current_id:
-            self.guard(lambda:self.library.move(self.current_id,self.move_combo.currentData()))
 
     def show_tool(self, identity):
         self.view_mode='store'
@@ -630,6 +677,7 @@ class Window(QMainWindow):
         tool=self.selected_release()['local']
         if not tool:raise ValueError('此版本未安装')
         if QMessageBox.question(self,'卸载工具版本','卸载 '+tool['name']+' '+tool['version']+'？\n会删除工具架内该版本的文件。此前复制到其他软件目录的文件需自行管理。')!=QMessageBox.StandardButton.Yes:return
+        self.close_tool_by_id(tool['id'])
         self.library.uninstall(tool)
         selected=self.workspace.config.get('selectedVersions',{})
         if selected.get(tool['id'])==package_key(tool):selected.pop(tool['id'],None);self.workspace.save_config()
@@ -640,6 +688,7 @@ class Window(QMainWindow):
         installed=[t for t in self.installed() if t['id']==identity]
         if not installed:return
         if QMessageBox.question(self,'卸载工具','卸载 '+installed[0]['name']+' 的全部 '+str(len(installed))+' 个本地版本？\n外部软件中的插件副本不会被删除。')!=QMessageBox.StandardButton.Yes:return
+        self.close_tool_by_id(identity)
         for tool in installed:self.library.uninstall(tool)
         self.workspace.config.get('selectedVersions',{}).pop(identity,None);self.workspace.save_config()
         self.render_cards();self.status.setText('已卸载工具全部本地版本。')
@@ -660,11 +709,11 @@ class Window(QMainWindow):
         self.job.start()
 
     def idle(self):
-        self.job.deleteLater();self.job=None;self.progress.hide();self.sync_button.setEnabled(True);self.update_button.setEnabled(not self.development)
+        self.job.wait();self.job.deleteLater();self.job=None;self.progress.hide();self.sync_button.setEnabled(True);self.update_button.setEnabled(not self.development)
         if self.pages.currentWidget()==self.detail and self.current_id and any(e['id']==self.current_id for e in self.catalog.data['packages']):
             position=self.detail.verticalScrollBar().value();self.show_tool(self.current_id);QTimer.singleShot(0,lambda:self.detail.verticalScrollBar().setValue(position))
         elif self.pages.currentWidget()==self.tool_panel:
-            self.open_tool_panel(self.current_id)
+            self.refresh_running_connections()
         else:self.render_cards()
         if self.pending_restart:
             stage=self.pending_restart;self.pending_restart=None
@@ -687,7 +736,7 @@ class Window(QMainWindow):
         self.check_job.finished.connect(self.background_finished);self.check_job.start()
 
     def background_finished(self):
-        self.check_job.deleteLater();self.check_job=None
+        self.check_job.wait();self.check_job.deleteLater();self.check_job=None
         if self.pending_restart and not self.job:
             stage=self.pending_restart;self.pending_restart=None
             self.guard(lambda:self.restart_updated(stage))
@@ -729,7 +778,7 @@ class Window(QMainWindow):
             self.status.setText('暂不重载，请先修复源码：'+str(error));return
         state={'view':self.view_mode}
         (self.store.root/'preview-state.json').write_text(json.dumps(state),encoding='utf-8')
-        self.workspace.shutdown()
+        self.shutdown_running_tools()
         QApplication.instance().exit(75)
 
     def check_client_update(self):
@@ -761,7 +810,8 @@ class Window(QMainWindow):
         if self.check_job or self.job:
             self.status.setText('网络任务进行中，请完成后关闭；工具和登录保持。');event.ignore()
         else:
-            self.workspace.shutdown()
+            self.connection_timer.stop()
+            self.shutdown_running_tools()
             event.accept()
 
 

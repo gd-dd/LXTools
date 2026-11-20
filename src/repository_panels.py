@@ -54,7 +54,7 @@ class RepositoryWorkspace(QWidget):
         super().__init__();self.tools_root=Path(tools_root);self.tools_root.mkdir(parents=True,exist_ok=True)
         self.config_file=Path(config_root)/'repository-tools-v2.json'
         self.config=json.loads(self.config_file.read_text('utf-8')) if self.config_file.exists() else {'selectedVersions':{},'applications':{}}
-        self.layout=QVBoxLayout(self);self.current=None
+        self.layout=QVBoxLayout(self);self.current=None;self.workspace_state={}
 
     def save_config(self):write_json(self.config_file,self.config)
 
@@ -82,7 +82,7 @@ class RepositoryWorkspace(QWidget):
             from native_panels import NativePanelHandle
             container=QWidget(self);content=QVBoxLayout(container);content.setContentsMargins(0,0,0,0)
             try:
-                self.native_panel=NativePanelHandle(tool,self.config_file.parent,container)
+                self.native_panel=NativePanelHandle(tool,self.config_file.parent,container,self.workspace_state)
                 content.addWidget(self.native_panel.widget)
                 self.layout.addWidget(container,1)
             except (Exception,SystemExit) as error:

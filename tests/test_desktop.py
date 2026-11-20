@@ -35,7 +35,7 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse(hasattr(window,'panel_button'))
             window.close()
 
-    def test_generic_panel_versions_and_chinese_folders(self):
+    def test_running_panel_versions_and_legacy_folder_data(self):
         with tempfile.TemporaryDirectory() as root:
             root=Path(root);_,_,one=fixtures.fixture(root/'tools','1.0.0');_,_,two=fixtures.fixture(root/'tools','2.0.0')
             window=Window(ToolStore(root/'config'),root/'tools',autoload=False)
@@ -43,14 +43,23 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(window.release_list.topLevelItemCount(),2)
             window.navigate('library');window.open_tool_panel('repo-42')
             self.assertEqual(window.pages.currentWidget(),window.tool_panel)
-            self.assertEqual([b.text() for b in window.workspace.findChildren(QPushButton) if b.text()=='运行编辑器'],['运行编辑器'])
+            self.assertEqual([b.text() for b in window.running_tools['repo-42'].findChildren(QPushButton) if b.text()=='运行编辑器'],['运行编辑器'])
             window.show_tool('repo-42');window.release_list.setCurrentItem(window.release_list.topLevelItem(0));window.activate_selected()
             self.assertEqual(window.workspace.config['selectedVersions']['repo-42'],'2.0.0')
             window.release_list.setCurrentItem(window.release_list.topLevelItem(1));window.activate_selected()
             self.assertEqual(window.workspace.config['selectedVersions']['repo-42'],'1.0.0')
-            key=window.library.create_folder('中文夹子');window.navigate('library');window.open_tool_panel('repo-42');window.move_combo.setCurrentIndex(1)
+            key=window.library.create_folder('中文夹子')
+            window.library.move('repo-42',key)
+            window.navigate('library')
+            window.open_tool_panel('repo-42')
+            running=window.running_tools['repo-42']
+            window.navigate('settings')
+            self.assertEqual(window.running_tabs.count(),1)
+            window.focus_running_tool(0)
+            self.assertIs(window.tool_panel.currentWidget(),running)
+            window.close_running_tool(0)
+            self.assertEqual(window.running_tabs.count(),0)
             self.assertEqual(window.library.data['assignments']['repo-42'],key)
-            window.navigate('library',key);self.assertIn('1 款',window.summary.text())
             with patch('desktop.subprocess.Popen') as popen,patch.object(window,'close') as close:
                 window.restart_updated(root/'staged');popen.assert_called_once();close.assert_called_once()
             window.close()
@@ -93,7 +102,7 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(window.pages.currentWidget(),window.tool_panel)
             self.assertEqual(window.tool_panel.findChildren(QTabWidget),[])
             self.assertFalse(window.detail.isVisible())
-            self.assertEqual(window.workspace.current['version'],'1.0.0')
+            self.assertEqual(window.running_tools['repo-42'].current['version'],'1.0.0')
             window.show_tool('repo-42')
             with patch.object(window,'busy',side_effect=lambda fn,done,message,**options:done(None)):
                 window.install_entry(two)
