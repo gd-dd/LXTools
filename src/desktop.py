@@ -256,8 +256,19 @@ class Window(QMainWindow):
             window=window_ref()
             if window is None:
                 raise ValueError('工具架已关闭。')
-            window.open_workflow_tool(identity)
+            return window.open_workflow_tool(identity)
+        def installed_tool_setting(identity, key):
+            window=window_ref()
+            if window is None or not any(tool['id']==identity for tool in window.installed()):
+                return None
+            path=window.store.root/'tool-data'/identity/'panel-settings.json'
+            try:
+                settings=json.loads(path.read_text('utf-8'))
+            except (OSError, ValueError):
+                return None
+            return settings.get(key) if isinstance(settings,dict) else None
         self.workspace.workspace_state['open_tool']=open_tool
+        self.workspace.workspace_state['installed_tool_setting']=installed_tool_setting
         self.pages.addWidget(self.tool_panel)
         self.connection_timer=QTimer(self)
         self.connection_timer.timeout.connect(self.refresh_running_connections)
@@ -324,6 +335,8 @@ class Window(QMainWindow):
         if self.view_mode!='library':
             self.navigate('library')
         self.open_tool_panel(identity)
+        handle=getattr(self.running_tools[identity],'native_panel',None)
+        return getattr(handle,'widget',None)
 
     def open_tool_panel(self,identity):
         if self.view_mode!='library':raise ValueError('请从“我的工具”打开工具面板')
